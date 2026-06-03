@@ -1,74 +1,104 @@
 """
 Line movement / steam detection.
 
-Compares the most recent odds snapshot to the previous one.
-Fires a directional signal only when STEAM_MIN_BOOKS books have moved
-in the same direction — a single book moving is noise.
+Every scrape inserts rows into odds_snapshots. To compute the signal for a prop
+we look at snapshots within a rolling window (default 30 min) and ask:
+  - How many books moved in the same direction?
+  - How large was the average move?
+  - Did a sharp book (Pinnacle / Circa) move first?
 
-Signal output: float in [-1, 1]
-  > 0  → steam toward Over  (books shortening Over odds = more confident it hits)
-  < 0  → steam toward Under
-  0    → no consensus movement or insufficient books moved
+Requirements before the signal fires:
+  - At least STEAM_MIN_BOOKS books moved the same way
+  - Each individual book move must exceed STEAM_NOISE_FLOOR (0.5 pp) — smaller
+    moves are data noise or routine micro-adjustments
+
+Output: additive nudge in [-0.10, +0.10] added directly to the blended
+true_prob. Positive = steam toward Over. The blend layer's γ weight further
+scales it, keeping it a small correction rather than a dominant signal.
+
+Sharp-book boost: if Pinnacle or Circa initiated the move in the consensus
+direction, the signal is boosted by STEAM_SHARP_BOOST (25%). Sharp books
+moving first is a stronger EV indicator than retail books following.
 """
 from collections import defaultdict
-from backend.config import STEAM_MIN_BOOKS, BOOK_WEIGHTS
+from datetime import datetime, timedelta
+
+from backend.config import settings
+from backend.ev.shin import american_to_implied, power_devig
+
+SHARP_BOOKS = {"pinnacle", "circa"}
 
 
-def _american_to_implied(odds: int) -> float:
-    if odds > 0:
-        return 100 / (odds + 100)
-    return abs(odds) / (abs(odds) + 100)
+def _devig_to_over_prob(over_odds: int | None, under_odds: int | None) -> float | None:
+    if over_odds is None or under_odds is None:
+        return None
+    p_o, p_u = power_devig(american_to_implied(over_odds), american_to_implied(under_odds))
+    s = p_o + p_u
+    return p_o / s if s > 0 else None
 
 
 def compute_movement_signal(
-    prev_snapshots: list[dict],   # [{book, direction, odds}, ...]
-    curr_snapshots: list[dict],
+    snapshots: list[dict],   # all snapshots for this prop, any time range
+    now: datetime | None = None,
 ) -> float:
     """
-    Returns a movement signal in [-1, 1].
-    Positive = steam toward Over, negative = steam toward Under.
+    snapshots: list of dicts with keys: book, direction, over_odds, under_odds, snapshot_at (datetime)
+    Returns additive signal in [-0.10, +0.10]. Positive = steam toward Over.
     """
-    if not prev_snapshots or not curr_snapshots:
+    now = now or datetime.utcnow()
+    window_start = now - timedelta(minutes=settings.steam_window_minutes)
+
+    in_window = [s for s in snapshots if s["snapshot_at"] >= window_start]
+    if len(in_window) < 2:
         return 0.0
 
-    # Build lookup: (book, direction) -> odds
-    prev = {(s["book"], s["direction"]): s["odds"] for s in prev_snapshots}
-    curr = {(s["book"], s["direction"]): s["odds"] for s in curr_snapshots}
+    # Bucket by book → list of snapshots sorted ascending by time
+    by_book: dict[str, list[dict]] = defaultdict(list)
+    for s in in_window:
+        by_book[s["book"].lower()].append(s)
 
-    # Count books moving toward each direction
-    # "Moving toward Over" = Over odds shortening (implied prob increasing)
-    over_movers:  list[str] = []
+    over_movers: list[str] = []
     under_movers: list[str] = []
+    total_delta = 0.0
+    earliest_sharp: dict[str, datetime | None] = {"over": None, "under": None}
 
-    books = set(b for b, _ in curr.keys())
-    for book in books:
-        prev_over  = prev.get((book, "Over"))
-        curr_over  = curr.get((book, "Over"))
-        if prev_over is None or curr_over is None:
+    for book, snaps in by_book.items():
+        if len(snaps) < 2:
+            continue
+        snaps_sorted = sorted(snaps, key=lambda x: x["snapshot_at"])
+        first, last = snaps_sorted[0], snaps_sorted[-1]
+
+        p0 = _devig_to_over_prob(first.get("over_odds"), first.get("under_odds"))
+        p1 = _devig_to_over_prob(last.get("over_odds"),  last.get("under_odds"))
+        if p0 is None or p1 is None:
             continue
 
-        prev_p = _american_to_implied(prev_over)
-        curr_p = _american_to_implied(curr_over)
-        delta = curr_p - prev_p
+        delta = p1 - p0
+        if abs(delta) < settings.steam_noise_floor:
+            continue
 
-        if delta > 0.005:    # Over implied prob increased → steam toward Over
-            over_movers.append(book)
-        elif delta < -0.005: # Over implied prob decreased → steam toward Under
-            under_movers.append(book)
+        total_delta += delta
+        direction = "over" if delta > 0 else "under"
+        (over_movers if delta > 0 else under_movers).append(book)
 
-    def _weighted_count(movers: list[str]) -> float:
-        return sum(BOOK_WEIGHTS.get(b, 1.0) for b in movers)
+        if book in SHARP_BOOKS:
+            t = last["snapshot_at"]
+            if earliest_sharp[direction] is None or t < earliest_sharp[direction]:
+                earliest_sharp[direction] = t
 
-    over_weight  = _weighted_count(over_movers)
-    under_weight = _weighted_count(under_movers)
+    dominant = "over" if len(over_movers) >= len(under_movers) else "under"
+    dominant_count = len(over_movers) if dominant == "over" else len(under_movers)
 
-    if len(over_movers) >= STEAM_MIN_BOOKS and over_weight > under_weight:
-        # Normalise by max possible weighted count
-        max_weight = sum(BOOK_WEIGHTS.values())
-        return min(over_weight / max_weight, 1.0)
+    if dominant_count < settings.steam_min_books:
+        return 0.0
 
-    if len(under_movers) >= STEAM_MIN_BOOKS and under_weight > over_weight:
-        max_weight = sum(BOOK_WEIGHTS.values())
-        return -min(under_weight / max_weight, 1.0)
+    total_movers = len(over_movers) + len(under_movers)
+    avg_delta = total_delta / total_movers if total_movers else 0.0
+    signal = max(-0.10, min(0.10, avg_delta))
 
-    return 0.0
+    # Boost if a sharp book initiated the move in the consensus direction
+    if earliest_sharp[dominant] is not None:
+        signal *= settings.steam_sharp_boost
+        signal = max(-0.10, min(0.10, signal))
+
+    return signal

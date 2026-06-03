@@ -10,14 +10,14 @@ For a given player + stat_type + line + direction, compute:
 Returns a probability estimate and the effective sample size n.
 """
 import math
-from backend.config import (
-    BETA_PRIOR_A, BETA_PRIOR_B, ROLLING_WINDOWS, EXP_DECAY_HALFLIFE
-)
+from backend.config import settings
+
+_ROLLING_WINDOWS = [5, 10, 20]
 
 
-def _decay_weight(age: int, halflife: float) -> float:
-    """Exponential decay weight: age=0 is most recent game."""
-    return math.exp(-math.log(2) * age / halflife)
+def _decay_weight(age: int) -> float:
+    """Exponential decay: age=0 is most recent game. weight = exp(-λ * age)."""
+    return math.exp(-settings.decay_lambda * age)
 
 
 def compute_hit_rate(

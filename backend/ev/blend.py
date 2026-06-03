@@ -2,62 +2,55 @@
 EV blend, Kelly criterion, and breakeven computation.
 
 Weights:
-  α (market_prob):     ALPHA_BASE → 0.50 as β scales up
-  β (historical_prob): 0.0 → BETA_MAX  (scales with sample size n)
-  γ (movement_signal): GAMMA (fixed)
+  α (market_prob):      starts at alpha_market, absorbs unused β when sample is small
+  β (historical_prob):  scales from 0 → beta_historical_max as sample size grows
+  γ (movement_signal):  applied as a multiplier on the additive movement nudge
 
-Movement signal ∈ [-1, 1] is converted to a probability boost/penalty:
-  p_movement = 0.5 + signal * 0.10  (±10 pp max contribution)
-  This keeps it in [0, 1] and symmetrical around 50%.
+Movement is an ADDITIVE NUDGE (not a third probability):
+  true_prob = α*market_prob + β*historical_prob + γ*movement_signal
+  clamped to [0.01, 0.99]
 
-EV% = blended_prob - breakeven_prob(n_picks)
-Kelly fraction = (p*(b+1) - 1) / b  where b = net_odds_decimal
+This is cleaner than treating movement as an independent probability estimate —
+the signal is a directional correction to the market price, not a standalone view.
+
+Kelly uses half-Kelly by default (kelly_fraction_multiplier = 0.5) with a hard cap.
+Breakeven per pick for a Power Play parlay:
+  breakeven(n_picks) = (1 / multiplier)^(1/n_picks)
 """
-import math
 import statistics
-from backend.config import (
-    ALPHA_BASE, BETA_MAX, BETA_RAMP_N, GAMMA,
-    POWER_PLAY_MULTIPLIERS,
-)
+from backend.config import settings
 
 
-def _weights(n: int) -> tuple[float, float, float]:
-    """Return (alpha, beta, gamma) given sample size n."""
-    beta  = BETA_MAX * min(n / BETA_RAMP_N, 1.0)
-    alpha = 1.0 - beta - GAMMA
-    return alpha, beta, GAMMA
-
-
-def _movement_to_prob(signal: float, direction: str) -> float:
-    """
-    Convert a [-1,1] movement signal to a probability for the given direction.
-    signal > 0 → steam toward Over → boosts Over probability.
-    """
-    # signal is already in "toward Over" convention; flip for Under
-    directional = signal if direction == "Over" else -signal
-    return 0.5 + directional * 0.10
+def _effective_weights(sample_n: int) -> tuple[float, float, float]:
+    """Return (alpha_eff, beta_eff, gamma) given the historical sample size."""
+    ramp = min(sample_n / settings.historical_full_sample, 1.0)
+    beta  = settings.beta_historical_max * ramp
+    alpha = settings.alpha_market + (settings.beta_historical_max - beta)
+    return alpha, beta, settings.gamma_movement
 
 
 def breakeven(n_picks: int) -> float:
-    """
-    Minimum per-pick true probability for a Power Play parlay to be +EV.
-    breakeven_per_pick = (1 / multiplier) ^ (1 / n_picks)
-    """
-    mult = POWER_PLAY_MULTIPLIERS.get(n_picks, POWER_PLAY_MULTIPLIERS[2])
+    """Minimum per-pick true probability for a Power Play parlay to be +EV."""
+    mult = settings.power_play_multipliers.get(n_picks, 3.0)
     return (1.0 / mult) ** (1.0 / n_picks)
 
 
 def kelly_fraction(true_prob: float, n_picks: int) -> float:
     """
-    Kelly fraction for one pick in an n-pick Power Play parlay.
-    b = net_decimal_odds - 1  (e.g., 3x payout on a 2-pick = b=2)
-    f = (p*(b+1) - 1) / b
-    Clamped to [0, 0.25] (max quarter-Kelly for safety).
+    Half-Kelly fraction for one pick in an n-pick Power Play.
+    b = net decimal odds = multiplier - 1
+    full_kelly = (p*(b+1) - 1) / b
+    Returns 0 if EV is negative.
     """
-    mult = POWER_PLAY_MULTIPLIERS.get(n_picks, POWER_PLAY_MULTIPLIERS[2])
+    mult = settings.power_play_multipliers.get(n_picks, 3.0)
     b = mult - 1.0
-    f = (true_prob * (b + 1) - 1) / b
-    return max(0.0, min(f, 0.25))
+    if b <= 0:
+        return 0.0
+    full_kelly = (true_prob * (b + 1) - 1) / b
+    if full_kelly <= 0:
+        return 0.0
+    half_kelly = full_kelly * settings.kelly_fraction_multiplier
+    return min(half_kelly, settings.kelly_max)
 
 
 class EVResult:
@@ -65,37 +58,35 @@ class EVResult:
         "market_prob", "historical_prob", "movement_signal",
         "blended_prob", "ev_pct", "ev_std",
         "kelly_2pick", "kelly_3pick", "kelly_4pick",
-        "sample_n",
+        "sample_n", "weights_used",
     )
 
     def __init__(
         self,
-        market_prob: float,
-        historical_prob: float,
-        movement_signal: float,
-        direction: str,
-        sample_n: int,
+        market_prob:      float,
+        historical_prob:  float,
+        movement_signal:  float,   # additive nudge in [-0.10, +0.10]
+        sample_n:         int,
     ):
-        alpha, beta, gamma = _weights(sample_n)
-        p_move = _movement_to_prob(movement_signal, direction)
+        alpha, beta, gamma = _effective_weights(sample_n)
 
         self.market_prob     = market_prob
         self.historical_prob = historical_prob
         self.movement_signal = movement_signal
         self.sample_n        = sample_n
+        self.weights_used    = {"alpha": alpha, "beta": beta, "gamma": gamma}
 
-        self.blended_prob = (
-            alpha * market_prob +
-            beta  * historical_prob +
-            gamma * p_move
-        )
+        raw = alpha * market_prob + beta * historical_prob + gamma * movement_signal
+        self.blended_prob = max(0.01, min(0.99, raw))
 
-        # EV vs 2-pick breakeven as the baseline displayed metric
-        self.ev_pct = self.blended_prob - breakeven(2)
+        # EV vs 2-pick breakeven as the primary displayed metric
+        self.ev_pct = (self.blended_prob - breakeven(2)) * 100
 
-        # Confidence interval: std dev across the three component estimates
-        self.ev_std = statistics.pstdev([market_prob, historical_prob, p_move])
+        # Confidence interval: std dev across the three component estimates.
+        # Convert movement to an implied over-prob for variance (centered on market).
+        move_implied = max(0.0, min(1.0, market_prob + movement_signal))
+        self.ev_std = statistics.pstdev([market_prob, historical_prob, move_implied]) * 100
 
-        self.kelly_2pick = kelly_fraction(self.blended_prob, 2)
-        self.kelly_3pick = kelly_fraction(self.blended_prob, 3)
-        self.kelly_4pick = kelly_fraction(self.blended_prob, 4)
+        self.kelly_2pick = kelly_fraction(self.blended_prob, 2) * 100
+        self.kelly_3pick = kelly_fraction(self.blended_prob, 3) * 100
+        self.kelly_4pick = kelly_fraction(self.blended_prob, 4) * 100

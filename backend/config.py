@@ -1,65 +1,95 @@
-import os
-from dotenv import load_dotenv
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
-load_dotenv()
 
-ODDS_API_KEY = os.getenv("ODDS_API_KEY", "")
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-# Sportsbook market-cap weights (sharp books weighted higher)
-BOOK_WEIGHTS: dict[str, float] = {
-    "FanDuel":    34.04,
-    "DraftKings": 17.18,
-    "BetMGM":     12.37,
-    "Caesars":    7.67,
-    "BetRivers":  2.01,
-}
+    # --- External APIs ---
+    odds_api_key: str = ""
+    balldontlie_api_key: str = ""
 
-# Books excluded from weighted average (private/offshore, lower signal)
-PRIVATE_BOOKS: set[str] = {"MyBookie.ag", "BetOnline.ag", "Bovada", "SuperBook"}
+    # --- Database ---
+    database_url: str = "sqlite+aiosqlite:///./ev_bets.db"
 
-# PrizePicks league IDs
-LEAGUE_IDS: dict[str, int] = {
-    "NBA": 7,
-    "NHL": 8,
-    "MLB": 2,
-}
+    # --- Book weights (sharpness-based, NOT market-cap-based) ---
+    # Pinnacle and Circa set lines; retail books follow. Weight accordingly.
+    # If a book isn't listed, it gets book_weight_default.
+    book_weights: dict[str, float] = {
+        "pinnacle":    0.40,
+        "circa":       0.30,
+        "draftkings":  0.15,
+        "fanduel":     0.15,
+        "betmgm":      0.05,
+        "caesars":     0.05,
+        "betrivers":   0.03,
+    }
+    book_weight_default: float = 0.03
 
-# PrizePicks Power Play payout multipliers (update if PrizePicks changes them)
-# breakeven per pick = (1/multiplier)^(1/n_picks)
-POWER_PLAY_MULTIPLIERS: dict[int, float] = {
-    2: 3.0,
-    3: 5.0,
-    4: 10.0,
-    5: 20.0,
-    6: 25.0,
-}
+    # Books excluded from weighted average entirely (offshore/private, low signal)
+    private_books: set[str] = {"mybookie.ag", "betonline.ag", "bovada", "superbook"}
 
-# Blend weights — converge as sample size grows
-# α (market) + β (historical) + γ (movement) = 1
-# β scales with sample size: β_effective = BETA_MAX * min(n / BETA_RAMP_N, 1)
-# remainder goes to α so γ stays fixed
-ALPHA_BASE  = 0.85   # market weight when n=0
-BETA_MAX    = 0.35   # max historical weight (reached at n >= BETA_RAMP_N)
-GAMMA       = 0.15   # movement weight (fixed)
-BETA_RAMP_N = 20     # sample size at which β reaches max
+    # --- PrizePicks league IDs ---
+    league_ids: dict[str, int] = {"NBA": 7, "NHL": 8, "MLB": 2}
 
-# Beta(a, b) prior for hit-rate regression to mean
-# Beta(10,10) → prior centered at 50% with weight of 20 synthetic games
-BETA_PRIOR_A = 10
-BETA_PRIOR_B = 10
+    # --- PrizePicks Power Play payout multipliers ---
+    # breakeven_per_pick(n) = (1 / multiplier)^(1/n)
+    power_play_multipliers: dict[int, float] = {
+        2: 3.0,
+        3: 5.0,
+        4: 10.0,
+        5: 20.0,
+        6: 25.0,
+    }
 
-# Rolling windows for historical hit rate (games)
-ROLLING_WINDOWS = [5, 10, 20]
-# Exponential decay half-life in games (more recent = more weight)
-EXP_DECAY_HALFLIFE = 5
+    # --- Blend weights ---
+    # α (market) is the anchor. β scales up with sample size; remainder → α.
+    # γ is applied as a multiplier on the additive movement nudge.
+    alpha_market: float       = 0.50
+    beta_historical_max: float = 0.35
+    gamma_movement: float     = 0.15
+    historical_full_sample: int = 20  # n games where β reaches β_max
 
-# Steam detection: minimum books that must move in same direction
-STEAM_MIN_BOOKS = 3
+    # --- Beta prior for hit-rate regression-to-mean ---
+    # Beta(10, 10) → 10 synthetic overs + 10 unders before real data
+    beta_prior_overs: float  = 10.0
+    beta_prior_unders: float = 10.0
 
-# Minutes filter: exclude games where player played outside ±N std devs of season avg
-MINUTES_FILTER_STD = 1.0
+    # --- Exponential decay for recent games ---
+    decay_lambda: float = 0.10  # weight = exp(-lambda * games_ago)
 
-# Minimum EV% to include in default response (clients can override)
-DEFAULT_MIN_EV = 0.0
+    # --- Minutes filter ---
+    minutes_std_threshold: float = 1.0  # exclude games >1σ off player's mean
 
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./ev_bets.db")
+    # --- Steam detection ---
+    steam_min_books: int      = 3
+    steam_window_minutes: int = 30
+    steam_noise_floor: float  = 0.005   # ignore moves < 0.5pp implied prob
+    steam_sharp_boost: float  = 1.25    # boost signal when sharp book moved first
+
+    # --- Kelly ---
+    kelly_fraction_multiplier: float = 0.5   # half-Kelly for safety
+    kelly_max: float = 0.25                  # hard cap regardless
+
+    # --- Frontend EV thresholds ---
+    ev_threshold_green: float  = 3.0   # %
+    ev_threshold_yellow: float = 1.0   # %
+
+    # --- Fuzzy name matching ---
+    name_match_threshold: int = 80    # rapidfuzz score 0-100
+    name_match_warn_below: float = 0.85
+
+    # --- ML migration ---
+    use_ml_model: bool = False
+    ml_min_resolved_predictions: int = 500
+
+
+settings = Settings()
+
+# Convenience re-exports used throughout the codebase
+BOOK_WEIGHTS        = settings.book_weights
+BOOK_WEIGHT_DEFAULT = settings.book_weight_default
+PRIVATE_BOOKS       = settings.private_books
+LEAGUE_IDS          = settings.league_ids
+POWER_PLAY_MULTIPLIERS = settings.power_play_multipliers
+ODDS_API_KEY        = settings.odds_api_key
+DATABASE_URL        = settings.database_url

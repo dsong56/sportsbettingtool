@@ -1,60 +1,89 @@
 """
-Shin (1993) devigging model for a two-outcome market (Over / Under).
+Power-method devigging for a two-outcome market (Over / Under).
 
-Simple normalization assumes the book's margin is proportional across both sides.
-Shin shows that informed bettors cause the margin to be asymmetric — heavier on
-the long shot side. The Shin model recovers the true probability p* by solving
-for the insider fraction z implied by the observed margin.
+The textbook "additive normalization" divides each raw implied prob by the total,
+treating vig as spread evenly. That's biased on lopsided lines: it shrinks both
+sides by the same factor, which doesn't match how books actually price asymmetric
+markets.
 
-For a two-outcome market with raw implied probabilities q1, q2 (summing to >1):
-    p* = (sqrt(z^2 + 4(1-z) * q1^2 / (q1+q2)) - z) / (2*(1-z))
+The power method finds k > 1 such that:
+    p_over_raw^k + p_under_raw^k = 1
 
-z is estimated from the total margin:  sum(q_i) - 1
+Since k > 1 and each p < 1, raising to a higher power shrinks longshots MORE than
+favorites — matching sharp book closing lines better than additive normalization.
+
+For symmetric -110/-110 lines the result matches simple normalization to 4+ decimal
+places. The methods diverge as the line becomes more lopsided.
+
+Note: this is often called "Shin's method" in sports analytics blogs, but it's more
+accurately the power / logarithmic method. The original Shin (1993) formula models
+insider trading explicitly via a different parameterization. The power method is the
+production workhorse most quant betting shops actually use.
 """
-import math
+from scipy.optimize import brentq
 
 
-def _american_to_implied(odds: int) -> float:
-    if odds > 0:
-        return 100 / (odds + 100)
-    return abs(odds) / (abs(odds) + 100)
+def american_to_implied(odds: int) -> float:
+    """Convert American odds to raw implied probability (vig still included)."""
+    if odds < 0:
+        return -odds / (-odds + 100)
+    return 100 / (odds + 100)
 
 
-def _estimate_z(q1: float, q2: float) -> float:
-    """Estimate insider fraction z from the observed margin."""
-    margin = q1 + q2 - 1.0
-    # Clamp to plausible range; typical sports books: 0.01 – 0.08
-    return max(0.01, min(margin * 0.7, 0.08))
+def power_devig(p_over_raw: float, p_under_raw: float) -> tuple[float, float]:
+    """Return (true_p_over, true_p_under) via the power method.
 
-
-def shin_prob(over_odds: int, under_odds: int) -> tuple[float, float]:
+    Falls back to simple normalization on degenerate inputs (no vig or bad data).
     """
-    Return (p_over, p_under) using the Shin model.
-    Both sum to 1.0 (vig removed).
-    """
-    q_over  = _american_to_implied(over_odds)
-    q_under = _american_to_implied(under_odds)
-    total   = q_over + q_under
+    total = p_over_raw + p_under_raw
+    if total <= 1.0 + 1e-9:
+        return p_over_raw / total, p_under_raw / total
 
-    z = _estimate_z(q_over, q_under)
+    def f(k: float) -> float:
+        return (p_over_raw ** k) + (p_under_raw ** k) - 1.0
 
-    def _shin(q: float) -> float:
-        discriminant = z**2 + 4 * (1 - z) * q**2 / total
-        return (math.sqrt(discriminant) - z) / (2 * (1 - z))
-
-    p_over  = _shin(q_over)
-    p_under = _shin(q_under)
-
-    # Normalise to ensure they sum to exactly 1
-    s = p_over + p_under
-    return p_over / s, p_under / s
+    try:
+        # At k=1: sum = total > 1. As k grows both terms shrink toward 0.
+        # brentq finds the unique k > 1 where they sum to exactly 1.
+        k = brentq(f, 1.0, 10.0, xtol=1e-9, maxiter=50)
+        return p_over_raw ** k, p_under_raw ** k
+    except (ValueError, RuntimeError):
+        return p_over_raw / total, p_under_raw / total
 
 
 def devig_book_odds(over_odds: int | None, under_odds: int | None) -> tuple[float, float] | None:
-    """
-    Returns Shin-devigged (p_over, p_under) for one book, or None if data missing.
-    Falls back to simple normalisation when one side is missing.
-    """
+    """Devig a single book's two-way market. Returns None if either side is missing."""
     if over_odds is None or under_odds is None:
         return None
-    return shin_prob(over_odds, under_odds)
+    return power_devig(american_to_implied(over_odds), american_to_implied(under_odds))
+
+
+def weighted_market_prob(
+    book_probs: dict[str, tuple[float, float]],
+    book_weights: dict[str, float],
+    default_weight: float,
+) -> tuple[float, float, int]:
+    """Aggregate per-book devigged probs into a market consensus.
+
+    Sharp books (Pinnacle, Circa) lead the market and get the highest weight.
+    Retail books lag and may distort the consensus, so they are discounted.
+
+    Returns (market_p_over, market_p_under, n_books_used).
+    """
+    if not book_probs:
+        return 0.5, 0.5, 0
+
+    total_w = sum_over = sum_under = 0.0
+    for book, (p_over, p_under) in book_probs.items():
+        w = book_weights.get(book.lower(), default_weight)
+        total_w   += w
+        sum_over  += w * p_over
+        sum_under += w * p_under
+
+    if total_w == 0:
+        return 0.5, 0.5, 0
+
+    p_over  = sum_over  / total_w
+    p_under = sum_under / total_w
+    s = p_over + p_under
+    return p_over / s, p_under / s, len(book_probs)
