@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { fetchProps, triggerRefresh, pollJob } from '../api'
 import PropTable from '../components/PropTable'
+import Toast from '../components/Toast'
 import type { Sport, PropResult } from '../types'
 
 const SPORTS: Sport[] = ['NBA', 'NHL', 'MLB']
@@ -71,9 +72,11 @@ export default function Dashboard() {
   const [sport, setSport]         = useState<Sport>('NBA')
   const [statType, setStatType]   = useState('All')
   const [direction, setDirection] = useState('All')
-  const [minEv, setMinEv]         = useState(0)
+  const [minEv, setMinEv]         = useState(-100)
   const [jobId, setJobId]         = useState<string | null>(null)
   const [jobStatus, setJobStatus] = useState<JobStatus>('idle')
+  const [jobError, setJobError]   = useState<string | null>(null)
+  const [toast, setToast]         = useState<{ message: string; type: 'success' | 'error' } | null>(null)
 
   // Reset stat filter when sport changes
   useEffect(() => { setStatType('All') }, [sport])
@@ -96,19 +99,37 @@ export default function Dashboard() {
     if (job.status === 'done') {
       qc.invalidateQueries({ queryKey: ['props'] })
       setJobId(null)
+      setJobError(null)
+      setToast({ message: `${job.sport} props updated successfully`, type: 'success' })
     } else if (job.status === 'failed') {
+      const err = job.error ?? 'Unknown error'
+      setJobError(err)
       setJobId(null)
+      setToast({ message: err, type: 'error' })
     }
   }, [qc])
 
   useEffect(() => {
     if (!jobId) return
-    const interval = setInterval(() => pollOnce(jobId), 2500)
+    let polls = 0
+    const MAX_POLLS = 72  // 3 minutes at 2.5s intervals
+    const interval = setInterval(() => {
+      polls++
+      if (polls > MAX_POLLS) {
+        clearInterval(interval)
+        setJobStatus('failed')
+        setJobError('Refresh timed out after 3 minutes — the scrape may still be running in the background')
+        setJobId(null)
+        return
+      }
+      pollOnce(jobId)
+    }, 2500)
     return () => clearInterval(interval)
   }, [jobId, pollOnce])
 
   const handleRefresh = async () => {
     setJobStatus('pending')
+    setJobError(null)
     const job = await triggerRefresh(sport)
     setJobId(job.job_id)
   }
@@ -201,9 +222,9 @@ export default function Dashboard() {
             </span>
           )}
 
-          {jobStatus === 'failed' && (
+          {jobStatus === 'failed' && jobError && (
             <span className="text-xs text-red-400 bg-red-500/10 border border-red-500/30 px-3 py-1.5 rounded-lg">
-              Refresh failed — check your API key
+              ✕ {jobError}
             </span>
           )}
         </div>
@@ -234,6 +255,14 @@ export default function Dashboard() {
           </div>
         )}
       </main>
+
+      {toast && (
+        <Toast
+          message={toast.message}
+          type={toast.type}
+          onDismiss={() => setToast(null)}
+        />
+      )}
     </div>
   )
 }

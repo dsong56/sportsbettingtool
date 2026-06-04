@@ -32,6 +32,7 @@ class EVResult(Base):
     line_score       = Column(Float, nullable=False)
     sport            = Column(String, nullable=False)
     direction        = Column(String, nullable=False)
+    odds_type        = Column(String, default="standard")  # standard | demon | goblin
     market_prob      = Column(Float)   # Shin-devigged weighted market probability
     historical_prob  = Column(Float)   # rolling hit-rate model
     movement_signal  = Column(Float)   # [-1, 1] steam direction

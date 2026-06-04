@@ -42,7 +42,7 @@ async def get_props(
         if key in seen:
             continue
         seen.add(key)
-        ev_pct = (r.ev_pct or 0) * 100 if r.ev_pct and r.ev_pct < 1 else (r.ev_pct or 0)
+        ev_pct = r.ev_pct or 0
         if ev_pct < min_ev:
             continue
         results.append({
@@ -51,6 +51,7 @@ async def get_props(
             "line_score":      r.line_score,
             "sport":           r.sport,
             "direction":       r.direction,
+            "odds_type":       r.odds_type or "standard",
             "market_prob":     r.market_prob,
             "historical_prob": r.historical_prob,
             "movement_signal": r.movement_signal,

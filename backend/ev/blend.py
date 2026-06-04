@@ -76,7 +76,12 @@ class EVResult:
         self.sample_n        = sample_n
         self.weights_used    = {"alpha": alpha, "beta": beta, "gamma": gamma}
 
-        raw = alpha * market_prob + beta * historical_prob + gamma * movement_signal
+        # Normalize the probabilistic portion (market + historical) to sum to 1,
+        # then add the movement nudge separately. This ensures that when
+        # movement_signal = 0, blended_prob = market_prob (not 0.85 * market_prob).
+        w_total = alpha + beta
+        prob_blend = (alpha / w_total) * market_prob + (beta / w_total) * historical_prob
+        raw = prob_blend + gamma * movement_signal
         self.blended_prob = max(0.01, min(0.99, raw))
 
         # EV vs 2-pick breakeven as the primary displayed metric

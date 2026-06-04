@@ -1,9 +1,12 @@
+export type OddsType = 'standard' | 'demon' | 'goblin'
+
 export interface PropResult {
   player_name:     string
   stat_type:       string
   line_score:      number
   sport:           string
   direction:       'Over' | 'Under'
+  odds_type:       OddsType
   game_date:       string
   market_prob:     number
   historical_prob: number

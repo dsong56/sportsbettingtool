@@ -2,6 +2,7 @@ import type { PropResult } from '../types'
 import Sparkline from './Sparkline'
 import KellyDisplay from './KellyDisplay'
 import SignalBadge from './SignalBadge'
+import OddsTypeBadge from './OddsTypeBadge'
 
 interface Props {
   prop: PropResult
@@ -34,7 +35,10 @@ export default function PropCard({ prop }: Props) {
             <span className="ml-2 text-xs text-gray-600">{prop.sport} · {prop.game_date}</span>
           </p>
         </div>
-        <SignalBadge prop={prop} />
+        <div className="flex items-center gap-2 flex-wrap justify-end">
+          <OddsTypeBadge oddsType={prop.odds_type} />
+          <SignalBadge prop={prop} />
+        </div>
       </div>
 
       {/* EV summary */}

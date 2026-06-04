@@ -7,7 +7,7 @@ from typing import NamedTuple
 
 import httpx
 
-from backend.config import LEAGUE_IDS
+from backend.config import settings
 
 _HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
@@ -16,13 +16,17 @@ _HEADERS = {
 _BASE = "https://api.prizepicks.com/projections"
 _CENTRAL = timezone(timedelta(hours=-5))
 
+# Only Over is offered for demon/goblin bets on PrizePicks
+OVER_ONLY_TYPES = {"demon", "goblin"}
+
 
 class PPProjection(NamedTuple):
     player_name: str
     stat_type:   str
     line_score:  float
-    game_date:   str   # "May-21-2026 07:10 PM"
+    game_date:   str
     sport:       str
+    odds_type:   str   # "standard" | "demon" | "goblin"
 
 
 def _fmt_date(iso: str) -> str:
@@ -31,7 +35,7 @@ def _fmt_date(iso: str) -> str:
 
 
 async def fetch_projections(sport: str) -> list[PPProjection]:
-    league_id = LEAGUE_IDS[sport]
+    league_id = settings.league_ids[sport]
     params = {"league_id": league_id, "per_page": 1000, "single_stat": True}
 
     async with httpx.AsyncClient(headers=_HEADERS, timeout=15) as client:
@@ -55,10 +59,16 @@ async def fetch_projections(sport: str) -> list[PPProjection]:
 
         player_id = proj["relationships"]["new_player"]["data"]["id"]
         player_name = player_map.get(player_id, "Unknown")
+
+        # Skip combo bets (e.g. "De'Aaron Fox + OG Anunoby") — no sportsbook market to devig against
+        if " + " in player_name:
+            continue
+
         line = attrs.get("flash_sale_line_score") or attrs["line_score"]
         stat = attrs["stat_type"]
         date_str = _fmt_date(attrs["start_time"])
+        odds_type = attrs.get("odds_type", "standard")
 
-        results.append(PPProjection(player_name, stat, float(line), date_str, sport))
+        results.append(PPProjection(player_name, stat, float(line), date_str, sport, odds_type))
 
     return results

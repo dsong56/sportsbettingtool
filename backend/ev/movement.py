@@ -21,7 +21,10 @@ direction, the signal is boosted by STEAM_SHARP_BOOST (25%). Sharp books
 moving first is a stronger EV indicator than retail books following.
 """
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 from backend.config import settings
 from backend.ev.shin import american_to_implied, power_devig
@@ -45,7 +48,7 @@ def compute_movement_signal(
     snapshots: list of dicts with keys: book, direction, over_odds, under_odds, snapshot_at (datetime)
     Returns additive signal in [-0.10, +0.10]. Positive = steam toward Over.
     """
-    now = now or datetime.utcnow()
+    now = now or _utcnow()
     window_start = now - timedelta(minutes=settings.steam_window_minutes)
 
     in_window = [s for s in snapshots if s["snapshot_at"] >= window_start]

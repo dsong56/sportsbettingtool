@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { PropResult } from '../types'
 import SignalBadge from './SignalBadge'
+import OddsTypeBadge from './OddsTypeBadge'
 import PropCard from './PropCard'
 
 interface Props {
@@ -78,6 +79,7 @@ export default function PropTable({ props }: Props) {
             <SortHeader label="True prob"   sortKey="blended_prob"     current={sortKey} onSort={setSortKey} />
             <SortHeader label="Market"      sortKey="market_prob"      current={sortKey} onSort={setSortKey} />
             <SortHeader label="Historical"  sortKey="historical_prob"  current={sortKey} onSort={setSortKey} />
+            <th className="px-3 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
             <th className="px-3 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Signal</th>
             <th className="px-3 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Kelly 2-pick</th>
             <th className="px-3 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Sport</th>
@@ -120,6 +122,9 @@ export default function PropTable({ props }: Props) {
                     {prop.sample_n > 0 ? `${(prop.historical_prob * 100).toFixed(1)}%` : '—'}
                   </td>
                   <td className="px-3 py-3">
+                    <OddsTypeBadge oddsType={prop.odds_type} />
+                  </td>
+                  <td className="px-3 py-3">
                     <SignalBadge prop={prop} />
                   </td>
                   <td className="px-3 py-3 font-mono text-indigo-400">
@@ -130,7 +135,7 @@ export default function PropTable({ props }: Props) {
 
                 {isOpen && (
                   <tr key={`${key}-card`}>
-                    <td colSpan={10} className="px-4 py-3 bg-gray-900/50">
+                    <td colSpan={11} className="px-4 py-3 bg-gray-900/50">
                       <PropCard prop={prop} />
                     </td>
                   </tr>
@@ -141,7 +146,7 @@ export default function PropTable({ props }: Props) {
 
           {sorted.length === 0 && (
             <tr>
-              <td colSpan={10} className="px-4 py-10 text-center text-gray-600">
+              <td colSpan={11} className="px-4 py-10 text-center text-gray-600">
                 No props found. Hit Refresh to fetch latest data.
               </td>
             </tr>

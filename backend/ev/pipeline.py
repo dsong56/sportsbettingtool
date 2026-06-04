@@ -17,8 +17,13 @@ from __future__ import annotations
 import re
 import unicodedata
 from collections import defaultdict
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 from typing import TypeAlias
+
+# SQLite stores naive datetimes. Use timezone-naive UTC throughout so DB
+# comparisons don't raise "can't compare offset-naive and offset-aware".
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 from rapidfuzz import fuzz, process
 from sqlalchemy import select, desc
@@ -105,12 +110,15 @@ async def _get_game_logs(player_name: str, sport: str, db: AsyncSession) -> list
         case "MLB": logs = await mlb.fetch_game_logs(player_name)
         case _:     logs = []
 
-    for log in logs:
-        db.add(GameLogCache(
-            player_name=player_name, sport=sport,
-            game_date=log["game_date"], stats=log,
-        ))
     if logs:
+        from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+        stmt = sqlite_insert(GameLogCache).values([
+            {"player_name": player_name, "sport": sport,
+             "game_date": log["game_date"], "stats": log,
+             "cached_at": _utcnow()}
+            for log in logs
+        ]).on_conflict_do_nothing()
+        await db.execute(stmt)
         await db.commit()
     return logs
 
@@ -159,7 +167,7 @@ async def run_pipeline(sport: str, db: AsyncSession) -> list[dict]:
 
     # Load recent snapshots for steam detection (last 2 hours to cover the window)
     from datetime import timedelta
-    cutoff = datetime.now(UTC) - timedelta(hours=2)
+    cutoff = _utcnow() - timedelta(hours=2)
     prev_snaps_rows = (await db.execute(
         select(OddsSnapshot)
         .where(OddsSnapshot.sport == sport, OddsSnapshot.snapshot_at >= cutoff)
@@ -177,7 +185,7 @@ async def run_pipeline(sport: str, db: AsyncSession) -> list[dict]:
             "snapshot_at": r.snapshot_at,
         })
 
-    now = datetime.now(UTC)
+    now = _utcnow()
     stat_fn = _get_stat_fn(sport)
     seen: set[tuple] = set()
     results: list[dict] = []
@@ -185,7 +193,11 @@ async def run_pipeline(sport: str, db: AsyncSession) -> list[dict]:
     for proj in pp_lines:
         canon, _ = _resolve_name(proj.player_name, canonical_pool, corrections)
 
-        for direction in ("Over", "Under"):
+        # Demon/goblin bets are Over-only on PrizePicks — never compute Under for them
+        from backend.scrapers.prizepicks import OVER_ONLY_TYPES
+        directions = ("Over",) if proj.odds_type in OVER_ONLY_TYPES else ("Over", "Under")
+
+        for direction in directions:
             for line in {proj.line_score, proj.line_score - 0.5, proj.line_score + 0.5}:
                 prop_key = (canon, proj.stat_type, line, direction, sport)
                 if prop_key in seen:
@@ -261,6 +273,7 @@ async def run_pipeline(sport: str, db: AsyncSession) -> list[dict]:
                 db.add(EVResultModel(
                     player_name=canon, stat_type=proj.stat_type,
                     line_score=line, sport=sport, direction=direction,
+                    odds_type=proj.odds_type,
                     market_prob=ev.market_prob,
                     historical_prob=ev.historical_prob,
                     movement_signal=ev.movement_signal,
@@ -293,6 +306,7 @@ async def run_pipeline(sport: str, db: AsyncSession) -> list[dict]:
                     "line_score":      line,
                     "sport":           sport,
                     "direction":       direction,
+                    "odds_type":       proj.odds_type,
                     "game_date":       proj.game_date,
                     "market_prob":     round(ev.market_prob, 4),
                     "historical_prob": round(ev.historical_prob, 4),

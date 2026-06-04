@@ -46,10 +46,16 @@ async def fetch_game_logs(player_name: str, n_games: int = 30) -> list[dict]:
             return []
         player_id = players[0]["id"]
 
+        from datetime import date
+        # BallDontLie season = year the season started (e.g. 2025 = 2025-26 season).
+        # NBA season starts in October, so before October use the previous year.
+        today = date.today()
+        season = today.year if today.month >= 10 else today.year - 1
+
         stats_resp = await client.get(f"{_BASE}/stats", params={
             "player_ids[]": player_id,
             "per_page": n_games,
-            "seasons[]": [2024],
+            "seasons[]": [season],
         })
         if stats_resp.status_code != 200:
             return []

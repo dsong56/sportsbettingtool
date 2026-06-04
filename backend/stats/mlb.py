@@ -35,13 +35,16 @@ async def fetch_game_logs(player_name: str, n_games: int = 30) -> list[dict]:
         is_pitcher = position in ("SP", "RP", "P")
         group = "pitching" if is_pitcher else "hitting"
 
+        from datetime import date
+        season = date.today().year  # MLB season = calendar year
         resp = await client.get(
             f"{_BASE}/people/{player_id}/stats",
-            params={"stats": "gameLog", "group": group, "sportId": 1, "season": 2025},
+            params={"stats": "gameLog", "group": group, "sportId": 1, "season": season},
         )
         if resp.status_code != 200:
             return []
-        splits = resp.json().get("stats", [{}])[0].get("splits", [])
+        stats_list = resp.json().get("stats", [])
+        splits = stats_list[0].get("splits", []) if stats_list else []
 
     rows = []
     for entry in splits[-n_games:]:
@@ -55,9 +58,12 @@ async def fetch_game_logs(player_name: str, n_games: int = 30) -> list[dict]:
         except ValueError:
             minutes = 0.0
 
-        hits = s.get("hits")
-        runs = s.get("runs")
-        rbi  = s.get("rbi")
+        hits    = s.get("hits")
+        runs    = s.get("runs")
+        rbi     = s.get("rbi")
+        singles = s.get("singles")
+        doubles = s.get("doubles")
+        walks   = s.get("baseOnBalls")
 
         rows.append({
             "game_date":    entry.get("date", "")[:10],
@@ -66,6 +72,11 @@ async def fetch_game_logs(player_name: str, n_games: int = 30) -> list[dict]:
             "totalBases":   s.get("totalBases"),
             "hits":         hits,
             "outs":         s.get("outs"),
+            "runs":         runs,
+            "rbi":          rbi,
+            "singles":      singles,
+            "doubles":      doubles,
+            "walks":        walks,
             "hits_runs_rbi": (hits + runs + rbi)
                              if all(v is not None for v in (hits, runs, rbi)) else None,
         })
@@ -80,5 +91,11 @@ def get_stat_value(row: dict, stat_type: str) -> float | None:
         case "Hits Allowed":       v = row.get("hits")
         case "Pitcher Outs":       v = row.get("outs")
         case "Hits+Runs+RBIs":     v = row.get("hits_runs_rbi")
+        case "Hits":               v = row.get("hits")
+        case "RBIs":               v = row.get("rbi")
+        case "Runs":               v = row.get("runs")
+        case "Singles":            v = row.get("singles")
+        case "Doubles":            v = row.get("doubles")
+        case "Walks":              v = row.get("walks")
         case _:                    v = None
     return float(v) if v is not None else None

@@ -46,6 +46,12 @@ SPORT_CONFIG: dict[str, tuple[str, dict[str, str]]] = {
             "Hits Allowed":       "pitcher_hits_allowed",
             "Pitcher Outs":       "pitcher_outs",
             "Hits+Runs+RBIs":     "batter_hits_runs_rbis",
+            "Hits":               "batter_hits",
+            "RBIs":               "batter_rbis",
+            "Runs":               "batter_runs_scored",
+            "Singles":            "batter_singles",
+            "Doubles":            "batter_doubles",
+            "Walks":              "batter_walks",
         },
     ),
 }
