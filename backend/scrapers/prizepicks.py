@@ -26,7 +26,8 @@ class PPProjection(NamedTuple):
     line_score:  float
     game_date:   str
     sport:       str
-    odds_type:   str   # "standard" | "demon" | "goblin"
+    odds_type:   str     # "standard" | "demon" | "goblin"
+    matchup:     str     # e.g. "DET/BOS" or "NYK"
 
 
 def _fmt_date(iso: str) -> str:
@@ -68,7 +69,8 @@ async def fetch_projections(sport: str) -> list[PPProjection]:
         stat = attrs["stat_type"]
         date_str = _fmt_date(attrs["start_time"])
         odds_type = attrs.get("odds_type", "standard")
+        matchup = attrs.get("description", "")
 
-        results.append(PPProjection(player_name, stat, float(line), date_str, sport, odds_type))
+        results.append(PPProjection(player_name, stat, float(line), date_str, sport, odds_type, matchup))
 
     return results

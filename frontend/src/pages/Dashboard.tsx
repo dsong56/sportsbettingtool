@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { fetchProps, triggerRefresh, pollJob } from '../api'
 import PropTable from '../components/PropTable'
+import ParlayOptimizer from '../components/ParlayOptimizer'
 import Toast from '../components/Toast'
 import type { Sport, PropResult } from '../types'
 
@@ -76,6 +77,7 @@ export default function Dashboard() {
   const [jobId, setJobId]         = useState<string | null>(null)
   const [jobStatus, setJobStatus] = useState<JobStatus>('idle')
   const [jobError, setJobError]   = useState<string | null>(null)
+  const [lastUpdated, setLastUpdated] = useState<string | null>(null)
   const [toast, setToast]         = useState<{ message: string; type: 'success' | 'error' } | null>(null)
 
   // Reset stat filter when sport changes
@@ -100,6 +102,7 @@ export default function Dashboard() {
       qc.invalidateQueries({ queryKey: ['props'] })
       setJobId(null)
       setJobError(null)
+      setLastUpdated(new Date().toLocaleTimeString())
       setToast({ message: `${job.sport} props updated successfully`, type: 'success' })
     } else if (job.status === 'failed') {
       const err = job.error ?? 'Unknown error'
@@ -163,7 +166,14 @@ export default function Dashboard() {
               <SportTab key={s} sport={s} active={sport === s} onClick={() => setSport(s)} />
             ))}
           </div>
-          <RefreshButton status={jobStatus} onClick={handleRefresh} />
+          <div className="flex items-center gap-3">
+            {lastUpdated && (
+              <span className="text-xs text-gray-500">
+                Last updated {lastUpdated}
+              </span>
+            )}
+            <RefreshButton status={jobStatus} onClick={handleRefresh} />
+          </div>
         </div>
       </header>
 
@@ -176,6 +186,9 @@ export default function Dashboard() {
           <StatPill label="Marginal (1–3%)" value={marginalEv}  sub="yellow rows" />
           <StatPill label="All-signal agree" value={allAgree}  sub={bestEv > 0 ? `Best: +${bestEv.toFixed(1)}%` : '—'} />
         </div>
+
+        {/* Parlay optimizer */}
+        <ParlayOptimizer props={props} />
 
         {/* Filters */}
         <div className="flex flex-wrap items-center gap-3">

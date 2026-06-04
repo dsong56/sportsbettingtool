@@ -8,8 +8,6 @@ interface Props {
 
 export default function Toast({ message, type, onDismiss }: Props) {
   const [visible, setVisible] = useState(false)
-  const [timestamp] = useState(() => new Date().toLocaleTimeString())
-
   useEffect(() => {
     const show = setTimeout(() => setVisible(true), 10)
     return () => clearTimeout(show)
@@ -31,7 +29,6 @@ export default function Toast({ message, type, onDismiss }: Props) {
       <span className="mt-0.5 text-base shrink-0">{type === 'success' ? '✓' : '✕'}</span>
       <div className="flex-1 min-w-0">
         <p className="font-medium leading-snug">{message}</p>
-        <p className="text-xs opacity-50 mt-1">{timestamp}</p>
       </div>
       <button
         onClick={handleClose}

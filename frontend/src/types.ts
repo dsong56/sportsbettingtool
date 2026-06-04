@@ -8,6 +8,7 @@ export interface PropResult {
   direction:       'Over' | 'Under'
   odds_type:       OddsType
   game_date:       string
+  matchup:         string
   market_prob:     number
   historical_prob: number
   movement_signal: number

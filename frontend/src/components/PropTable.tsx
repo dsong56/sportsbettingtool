@@ -96,9 +96,16 @@ export default function PropTable({ props }: Props) {
                   className={`transition-colors cursor-pointer ${evColor(prop.ev_pct)}`}
                   onClick={() => setExpanded(isOpen ? null : key)}
                 >
-                  <td className="px-3 py-3 font-medium text-gray-200 whitespace-nowrap">
-                    {prop.player_name}
-                    {prop.minutes_flag ? <span className="ml-1.5 text-amber-400 text-xs">⚠</span> : null}
+                  <td className="px-3 py-3 whitespace-nowrap">
+                    <p className="font-medium text-gray-200">
+                      {prop.player_name}
+                      {prop.minutes_flag ? <span className="ml-1.5 text-amber-400 text-xs">⚠</span> : null}
+                    </p>
+                    {prop.matchup && (
+                      <p className="text-xs text-gray-500 mt-0.5">
+                        {prop.matchup} · {prop.game_date}
+                      </p>
+                    )}
                   </td>
                   <td className="px-3 py-3 text-gray-400 whitespace-nowrap">
                     {prop.line_score} {prop.stat_type}

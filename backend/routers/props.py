@@ -52,6 +52,7 @@ async def get_props(
             "sport":           r.sport,
             "direction":       r.direction,
             "odds_type":       r.odds_type or "standard",
+            "matchup":         r.matchup or "",
             "market_prob":     r.market_prob,
             "historical_prob": r.historical_prob,
             "movement_signal": r.movement_signal,

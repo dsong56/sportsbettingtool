@@ -32,8 +32,12 @@ export default function PropCard({ prop }: Props) {
           <p className="font-semibold text-white">{prop.player_name}</p>
           <p className="text-sm text-gray-400">
             {prop.direction} {prop.line_score} {prop.stat_type}
-            <span className="ml-2 text-xs text-gray-600">{prop.sport} · {prop.game_date}</span>
           </p>
+          {prop.matchup && (
+            <p className="text-xs text-gray-500 mt-0.5">
+              {prop.matchup} · {prop.game_date} · {prop.sport}
+            </p>
+          )}
         </div>
         <div className="flex items-center gap-2 flex-wrap justify-end">
           <OddsTypeBadge oddsType={prop.odds_type} />
