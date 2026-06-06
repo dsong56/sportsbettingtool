@@ -1,5 +1,9 @@
 """
 Unified Odds API scraper for NBA, NHL, MLB.
+
+Batches all stat markets into a single request per game — reducing API usage
+from (n_games × n_markets) calls down to (n_games + 1) calls per refresh.
+
 Returns raw prop rows: (player_name, direction, line, odds, book, stat_type, sport)
 """
 from typing import NamedTuple
@@ -68,36 +72,46 @@ class OddsProp(NamedTuple):
 
 
 async def _get_game_ids(client: httpx.AsyncClient, sport_slug: str) -> list[str]:
-    url = f"{_BASE}/{sport_slug}/events"
-    resp = await client.get(url, params={"apiKey": ODDS_API_KEY, "regions": "us",
-                                          "markets": "h2h", "oddsFormat": "american"})
+    """1 request — returns all upcoming game IDs for the sport."""
+    resp = await client.get(
+        f"{_BASE}/{sport_slug}/events",
+        params={"apiKey": ODDS_API_KEY, "regions": "us",
+                "markets": "h2h", "oddsFormat": "american"},
+    )
     if resp.status_code != 200:
         return []
     return [g["id"] for g in resp.json()]
 
 
-async def _get_market(
+async def _get_all_markets_for_game(
     client: httpx.AsyncClient,
     sport_slug: str,
     game_id: str,
-    market_key: str,
-    pp_stat: str,
+    market_map: dict[str, str],   # {pp_stat: odds_api_key}
     sport: str,
 ) -> list[OddsProp]:
-    url = f"{_BASE}/{sport_slug}/events/{game_id}/odds"
-    resp = await client.get(url, params={
-        "apiKey": ODDS_API_KEY,
-        "regions": "us",
-        "markets": market_key,
-        "oddsFormat": "american",
-    })
+    """1 request per game — fetches all markets in a single batched call."""
+    # Build reverse lookup: odds_api_key → pp_stat_type
+    api_key_to_pp = {v: k for k, v in market_map.items()}
+    markets_param = ",".join(market_map.values())
+
+    resp = await client.get(
+        f"{_BASE}/{sport_slug}/events/{game_id}/odds",
+        params={
+            "apiKey":      ODDS_API_KEY,
+            "regions":     "us",
+            "markets":     markets_param,
+            "oddsFormat":  "american",
+        },
+    )
     if resp.status_code != 200:
         return []
 
     results: list[OddsProp] = []
     for bm in resp.json().get("bookmakers", []):
         for mkt in bm["markets"]:
-            if mkt["key"] != market_key:
+            pp_stat = api_key_to_pp.get(mkt["key"])
+            if pp_stat is None:
                 continue
             for oc in mkt["outcomes"]:
                 results.append(OddsProp(
@@ -113,19 +127,23 @@ async def _get_market(
 
 
 async def fetch_odds(sport: str) -> list[OddsProp]:
+    """
+    Fetches all player prop odds for a sport.
+    Request count: 1 (game IDs) + n_games (one batched call each).
+    Previously: 1 + n_games × n_markets.
+    """
     sport_slug, market_map = SPORT_CONFIG[sport]
 
-    async with httpx.AsyncClient(timeout=20) as client:
+    async with httpx.AsyncClient(timeout=30) as client:
         game_ids = await _get_game_ids(client, sport_slug)
         if not game_ids:
             return []
 
+        # Fetch all markets for all games concurrently, chunked to be polite
         tasks = [
-            _get_market(client, sport_slug, gid, mkey, pp_stat, sport)
+            _get_all_markets_for_game(client, sport_slug, gid, market_map, sport)
             for gid in game_ids
-            for pp_stat, mkey in market_map.items()
         ]
-        # Chunk to avoid hammering the API simultaneously
         results: list[OddsProp] = []
         chunk = 10
         for i in range(0, len(tasks), chunk):
