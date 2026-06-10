@@ -1,10 +1,15 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { fetchProps, triggerRefresh, pollJob } from '../api'
+import { fetchProps, triggerRefresh, pollJob, fetchSportsbookLines, triggerLinesRefresh } from '../api'
 import PropTable from '../components/PropTable'
 import ParlayOptimizer from '../components/ParlayOptimizer'
+import SportsbookTable from '../components/SportsbookTable'
+import BetSlip from '../components/BetSlip'
 import Toast from '../components/Toast'
+import { fetchPaperSummary } from '../api'
 import type { Sport, PropResult } from '../types'
+
+type Mode = 'prizepicks' | 'sportsbooks'
 
 const SPORTS: Sport[] = ['NBA', 'NHL', 'MLB']
 
@@ -67,7 +72,7 @@ function RefreshButton({ status, onClick }: { status: JobStatus; onClick: () => 
   )
 }
 
-export default function Dashboard() {
+export default function Dashboard({ onNavigatePortfolio }: { onNavigatePortfolio?: () => void }) {
   const qc = useQueryClient()
 
   const [sport, setSport]         = useState<Sport>('NBA')
@@ -79,6 +84,14 @@ export default function Dashboard() {
   const [jobError, setJobError]   = useState<string | null>(null)
   const [lastUpdated, setLastUpdated] = useState<string | null>(null)
   const [toast, setToast]         = useState<{ message: string; type: 'success' | 'error' } | null>(null)
+  const [slipPicks, setSlipPicks] = useState<PropResult[]>([])
+  const [mode, setMode]           = useState<Mode>('prizepicks')
+
+  const { data: paperSummary } = useQuery({
+    queryKey: ['paper-summary'],
+    queryFn: fetchPaperSummary,
+    staleTime: 30_000,
+  })
 
   // Reset stat filter when sport changes
   useEffect(() => { setStatType('All') }, [sport])
@@ -94,12 +107,19 @@ export default function Dashboard() {
     staleTime: 60_000,
   })
 
+  const { data: sbLines = [], isFetching: sbFetching } = useQuery({
+    queryKey: ['sportsbook-lines', sport],
+    queryFn: () => fetchSportsbookLines({ sport }),
+    staleTime: 60_000,
+    enabled: mode === 'sportsbooks',
+  })
+
   // Poll job status until done/failed
   const pollOnce = useCallback(async (id: string) => {
     const job = await pollJob(id)
     setJobStatus(job.status as JobStatus)
     if (job.status === 'done') {
-      qc.invalidateQueries({ queryKey: ['props'] })
+      qc.refetchQueries({ queryKey: mode === 'prizepicks' ? ['props'] : ['sportsbook-lines'] })
       setJobId(null)
       setJobError(null)
       setLastUpdated(new Date().toLocaleTimeString())
@@ -133,7 +153,9 @@ export default function Dashboard() {
   const handleRefresh = async () => {
     setJobStatus('pending')
     setJobError(null)
-    const job = await triggerRefresh(sport)
+    const job = mode === 'prizepicks'
+      ? await triggerRefresh(sport)
+      : await triggerLinesRefresh(sport)
     setJobId(job.job_id)
   }
 
@@ -154,28 +176,52 @@ export default function Dashboard() {
   return (
     <div className="min-h-screen bg-gray-950 text-gray-200">
 
-      {/* Header */}
-      <header className="border-b border-gray-800 bg-gray-900/60 backdrop-blur sticky top-0 z-10">
-        <div className="max-w-screen-xl mx-auto px-6 py-4 flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <span className="text-2xl font-bold text-white tracking-tight">EV Bets</span>
-            <span className="text-xs text-gray-500 bg-gray-800 px-2 py-0.5 rounded-full">PrizePicks</span>
-          </div>
-          <div className="flex items-center gap-2">
-            {SPORTS.map(s => (
-              <SportTab key={s} sport={s} active={sport === s} onClick={() => setSport(s)} />
-            ))}
+      {/* Sport selector + controls bar */}
+      <div className="border-b border-gray-800 bg-gray-900/60 backdrop-blur sticky top-12 z-10">
+        <div className="max-w-screen-xl mx-auto px-6 py-3 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-4">
+            {/* Mode toggle */}
+            <div className="flex items-center bg-gray-800 rounded-lg p-1 gap-1">
+              <button
+                onClick={() => setMode('prizepicks')}
+                className={`px-3 py-1 rounded-md text-xs font-semibold transition-colors ${
+                  mode === 'prizepicks' ? 'bg-indigo-600 text-white' : 'text-gray-400 hover:text-white'
+                }`}
+              >
+                PrizePicks
+              </button>
+              <button
+                onClick={() => setMode('sportsbooks')}
+                className={`px-3 py-1 rounded-md text-xs font-semibold transition-colors ${
+                  mode === 'sportsbooks' ? 'bg-indigo-600 text-white' : 'text-gray-400 hover:text-white'
+                }`}
+              >
+                Sportsbooks
+              </button>
+            </div>
+            {/* Sport tabs */}
+            <div className="flex items-center gap-2">
+              {SPORTS.map(s => (
+                <SportTab key={s} sport={s} active={sport === s} onClick={() => setSport(s)} />
+              ))}
+            </div>
           </div>
           <div className="flex items-center gap-3">
             {lastUpdated && (
-              <span className="text-xs text-gray-500">
-                Last updated {lastUpdated}
-              </span>
+              <span className="text-xs text-gray-500">Last updated {lastUpdated}</span>
+            )}
+            {onNavigatePortfolio && (
+              <button
+                onClick={onNavigatePortfolio}
+                className="text-xs text-indigo-400 hover:text-indigo-300 border border-indigo-900 hover:border-indigo-700 px-3 py-1.5 rounded-lg transition-colors"
+              >
+                Portfolio →
+              </button>
             )}
             <RefreshButton status={jobStatus} onClick={handleRefresh} />
           </div>
         </div>
-      </header>
+      </div>
 
       <main className="max-w-screen-xl mx-auto px-6 py-6 space-y-6">
 
@@ -187,87 +233,125 @@ export default function Dashboard() {
           <StatPill label="All-signal agree" value={allAgree}  sub={bestEv > 0 ? `Best: +${bestEv.toFixed(1)}%` : '—'} />
         </div>
 
-        {/* Parlay optimizer */}
-        <ParlayOptimizer props={props} />
-
-        {/* Filters */}
-        <div className="flex flex-wrap items-center gap-3">
-          {/* Stat type */}
-          <select
-            value={statType}
-            onChange={e => setStatType(e.target.value)}
-            className="bg-gray-900 border border-gray-700 text-gray-300 text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-          >
-            {SPORT_STATS[sport].map(s => (
-              <option key={s} value={s}>{s}</option>
-            ))}
-          </select>
-
-          {/* Direction */}
-          <select
-            value={direction}
-            onChange={e => setDirection(e.target.value)}
-            className="bg-gray-900 border border-gray-700 text-gray-300 text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-          >
-            <option value="All">Over &amp; Under</option>
-            <option value="Over">Over only</option>
-            <option value="Under">Under only</option>
-          </select>
-
-          {/* Min EV */}
-          <div className="flex items-center gap-2">
-            <label className="text-xs text-gray-500 whitespace-nowrap">Min EV%</label>
-            <input
-              type="number"
-              min={-20}
-              max={20}
-              step={0.5}
-              value={minEv}
-              onChange={e => setMinEv(parseFloat(e.target.value) || 0)}
-              className="w-20 bg-gray-900 border border-gray-700 text-gray-300 text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+        {mode === 'prizepicks' ? (
+          <>
+            {/* Parlay optimizer */}
+            <ParlayOptimizer
+              props={props}
+              currentBankroll={paperSummary?.current_bankroll ?? 100}
+              onBetPlaced={() => {
+                qc.invalidateQueries({ queryKey: ['paper-summary'] })
+                setToast({ message: 'Paper bet placed!', type: 'success' })
+              }}
             />
-          </div>
 
-          {isFetching && (
-            <span className="text-xs text-gray-500 flex items-center gap-1.5">
-              <span className="inline-block w-3 h-3 border-2 border-gray-700 border-t-indigo-500 rounded-full animate-spin" />
-              Loading…
-            </span>
-          )}
+            {/* Filters */}
+            <div className="flex flex-wrap items-center gap-3">
+              <select value={statType} onChange={e => setStatType(e.target.value)}
+                className="bg-gray-900 border border-gray-700 text-gray-300 text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+                {SPORT_STATS[sport].map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+              <select value={direction} onChange={e => setDirection(e.target.value)}
+                className="bg-gray-900 border border-gray-700 text-gray-300 text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+                <option value="All">Over &amp; Under</option>
+                <option value="Over">Over only</option>
+                <option value="Under">Under only</option>
+              </select>
+              <div className="flex items-center gap-2">
+                <label className="text-xs text-gray-500 whitespace-nowrap">Min EV%</label>
+                <input type="number" min={-100} max={20} step={0.5} value={minEv}
+                  onChange={e => setMinEv(parseFloat(e.target.value) || 0)}
+                  className="w-20 bg-gray-900 border border-gray-700 text-gray-300 text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-indigo-500" />
+              </div>
+              {isFetching && (
+                <span className="text-xs text-gray-500 flex items-center gap-1.5">
+                  <span className="inline-block w-3 h-3 border-2 border-gray-700 border-t-indigo-500 rounded-full animate-spin" />
+                  Loading…
+                </span>
+              )}
+              {jobStatus === 'failed' && jobError && (
+                <span className="text-xs text-red-400 bg-red-500/10 border border-red-500/30 px-3 py-1.5 rounded-lg">✕ {jobError}</span>
+              )}
+            </div>
 
-          {jobStatus === 'failed' && jobError && (
-            <span className="text-xs text-red-400 bg-red-500/10 border border-red-500/30 px-3 py-1.5 rounded-lg">
-              ✕ {jobError}
-            </span>
-          )}
-        </div>
+            {/* Legend */}
+            <div className="flex items-center gap-4 text-xs text-gray-600">
+              <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm bg-emerald-500/30" /> ≥ 3% EV</span>
+              <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm bg-yellow-500/20" /> 1–3% EV</span>
+              <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm bg-gray-800" /> &lt; 1% EV</span>
+              <span className="text-gray-700">· Click any row to expand details</span>
+            </div>
 
-        {/* Legend */}
-        <div className="flex items-center gap-4 text-xs text-gray-600">
-          <span className="flex items-center gap-1.5">
-            <span className="w-3 h-3 rounded-sm bg-emerald-500/30" /> ≥ 3% EV
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="w-3 h-3 rounded-sm bg-yellow-500/20" /> 1–3% EV
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="w-3 h-3 rounded-sm bg-gray-800" /> &lt; 1% EV
-          </span>
-          <span className="text-gray-700">· Click any row to expand details</span>
-        </div>
+            <PropTable
+              props={props}
+              slipPicks={slipPicks}
+              onAddToSlip={prop => {
+                const key = `${prop.player_name}|${prop.stat_type}|${prop.line_score}|${prop.direction}`
+                setSlipPicks(prev =>
+                  prev.some(p => `${p.player_name}|${p.stat_type}|${p.line_score}|${p.direction}` === key)
+                    ? prev : [...prev, prop]
+                )
+              }}
+            />
+            {props.length === 0 && !isFetching && (
+              <div className="text-center py-20 text-gray-600 space-y-3">
+                <p className="text-4xl">📊</p>
+                <p className="text-lg font-medium text-gray-500">No data yet</p>
+                <p className="text-sm">Hit <span className="text-indigo-400">Refresh</span> to pull live PrizePicks lines and sportsbook odds for {sport}.</p>
+              </div>
+            )}
+          </>
+        ) : (
+          <>
+            {/* Sportsbook filters */}
+            <div className="flex flex-wrap items-center gap-3">
+              <select value={direction} onChange={e => setDirection(e.target.value)}
+                className="bg-gray-900 border border-gray-700 text-gray-300 text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+                <option value="All">Over &amp; Under</option>
+                <option value="Over">Over only</option>
+                <option value="Under">Under only</option>
+              </select>
+              {sbFetching && (
+                <span className="text-xs text-gray-500 flex items-center gap-1.5">
+                  <span className="inline-block w-3 h-3 border-2 border-gray-700 border-t-indigo-500 rounded-full animate-spin" />
+                  Loading…
+                </span>
+              )}
+              {jobStatus === 'failed' && jobError && (
+                <span className="text-xs text-red-400 bg-red-500/10 border border-red-500/30 px-3 py-1.5 rounded-lg">✕ {jobError}</span>
+              )}
+            </div>
 
-        {/* Main table */}
-        <PropTable props={props} />
+            <div className="flex items-center gap-4 text-xs text-gray-600">
+              <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm bg-emerald-500/30" /> ≥ 3% EV</span>
+              <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm bg-yellow-500/20" /> 1–3% EV</span>
+              <span className="text-gray-700">· Straight bet at the listed sportsbook · Click any row to expand</span>
+            </div>
 
-        {/* Empty state when no data has been fetched yet */}
-        {props.length === 0 && !isFetching && (
-          <div className="text-center py-20 text-gray-600 space-y-3">
-            <p className="text-4xl">📊</p>
-            <p className="text-lg font-medium text-gray-500">No data yet</p>
-            <p className="text-sm">Hit <span className="text-indigo-400">Refresh</span> to pull live PrizePicks lines and sportsbook odds for {sport}.</p>
-          </div>
+            <SportsbookTable
+              lines={sbLines.filter(l => direction === 'All' || l.direction === direction)}
+            />
+            {sbLines.length === 0 && !sbFetching && (
+              <div className="text-center py-20 text-gray-600 space-y-3">
+                <p className="text-4xl">🏦</p>
+                <p className="text-lg font-medium text-gray-500">No sportsbook data yet</p>
+                <p className="text-sm">Hit <span className="text-indigo-400">Refresh</span> to scan all sportsbooks for soft lines on {sport}.</p>
+              </div>
+            )}
+          </>
         )}
       </main>
+
+      <BetSlip
+        picks={slipPicks}
+        bankroll={paperSummary?.current_bankroll ?? 100}
+        onRemove={idx => setSlipPicks(prev => prev.filter((_, i) => i !== idx))}
+        onClear={() => setSlipPicks([])}
+        onBetPlaced={() => {
+          qc.invalidateQueries({ queryKey: ['paper-summary'] })
+          setToast({ message: 'Paper bet placed!', type: 'success' })
+        }}
+      />
 
       {toast && (
         <Toast

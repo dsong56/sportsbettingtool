@@ -1,8 +1,11 @@
 import { useState } from 'react'
 import type { PropResult } from '../types'
+import { placePaperBet } from '../api'
 
 interface Props {
-  props: PropResult[]
+  props:            PropResult[]
+  currentBankroll?: number
+  onBetPlaced?:     () => void  // callback to refresh portfolio
 }
 
 // Power Play: all picks must hit
@@ -23,6 +26,7 @@ interface ParlaySuggestion {
   picks:             PropResult[]
   n_picks:           number
   play_type:         PlayType
+  multiplier:        number   // max payout multiplier
   ev_pct:            number   // net EV as % of stake
   kelly_pct:         number   // half-Kelly % of bankroll
   joint_prob?:       number   // power play only
@@ -131,6 +135,7 @@ function computePowerParlay(props: PropResult[], n: number): ParlaySuggestion | 
 
   return {
     picks, n_picks: n, play_type: 'power',
+    multiplier: mult,
     ev_pct, kelly_pct,
     joint_prob: joint,
     same_game_warning: hasSameGame(picks),
@@ -150,13 +155,140 @@ function computeFlexParlay(props: PropResult[], n: number): ParlaySuggestion | n
   const ev      = flexEV(probs, payouts)
   if (ev <= -1) return null  // negative EV even at best picks
 
+  const maxMult = Math.max(...Object.values(payouts))
   return {
     picks, n_picks: n, play_type: 'flex',
+    multiplier: maxMult,
     ev_pct: ev * 100,
     kelly_pct: flexKelly(probs, payouts) * 100,
     outcome_probs: flexOutcomeProbabilities(probs, payouts),
     same_game_warning: hasSameGame(picks),
   }
+}
+
+// ── Bet confirmation modal ────────────────────────────────────────────────────
+
+interface BetModalProps {
+  suggestion:      ParlaySuggestion
+  bankroll:        number
+  onConfirm:       (stake: number) => Promise<void>
+  onClose:         () => void
+}
+
+function BetModal({ suggestion: s, bankroll, onConfirm, onClose }: BetModalProps) {
+  const defaultStake = Math.min(
+    parseFloat((bankroll * s.kelly_pct / 100).toFixed(2)),
+    bankroll,
+  )
+  const [stake, setStake]     = useState(defaultStake > 0 ? defaultStake : 1)
+  const [loading, setLoading] = useState(false)
+  const [error, setError]     = useState<string | null>(null)
+
+  const maxPayout = parseFloat((stake * s.multiplier).toFixed(2))
+  const netProfit = parseFloat((maxPayout - stake).toFixed(2))
+
+  async function handleConfirm() {
+    if (stake <= 0 || stake > bankroll) return
+    setLoading(true)
+    setError(null)
+    try {
+      await onConfirm(stake)
+      onClose()
+    } catch (e: any) {
+      setError(e?.response?.data?.detail ?? 'Failed to place bet')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
+      <div className="bg-gray-900 border border-gray-700 rounded-2xl p-6 w-full max-w-md shadow-2xl space-y-5" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between">
+          <h3 className="text-white font-semibold text-lg">
+            Place Paper Bet — {s.n_picks}-Pick {s.play_type === 'power' ? 'Power Play' : 'Flex Play'}
+          </h3>
+          <button onClick={onClose} className="text-gray-500 hover:text-white text-xl leading-none">×</button>
+        </div>
+
+        {/* Picks summary */}
+        <div className="space-y-1">
+          {s.picks.map((p, i) => (
+            <div key={i} className="flex justify-between text-sm">
+              <span className="text-gray-300">{p.player_name} <span className="text-gray-500">{p.direction} {p.line_score} {p.stat_type}</span></span>
+              <span className="text-indigo-300 font-mono">{(p.blended_prob * 100).toFixed(1)}%</span>
+            </div>
+          ))}
+        </div>
+
+        {/* Stake input */}
+        <div>
+          <label className="text-xs text-gray-500 block mb-1">
+            Stake (bankroll: ${bankroll.toFixed(2)})
+          </label>
+          <div className="flex items-center gap-2">
+            <span className="text-gray-400">$</span>
+            <input
+              type="number"
+              min={0.01}
+              max={bankroll}
+              step={0.01}
+              value={stake}
+              onChange={e => setStake(parseFloat(e.target.value) || 0)}
+              className="flex-1 bg-gray-800 border border-gray-700 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500"
+            />
+            <button
+              onClick={() => setStake(parseFloat((bankroll * s.kelly_pct / 100).toFixed(2)))}
+              className="text-xs text-indigo-400 hover:text-indigo-300 whitespace-nowrap"
+            >
+              ½-Kelly
+            </button>
+          </div>
+        </div>
+
+        {/* Payout summary */}
+        <div className="grid grid-cols-3 gap-3">
+          <div className="bg-gray-800 rounded-lg p-3 text-center">
+            <p className="text-xs text-gray-500">Max payout</p>
+            <p className="text-sm font-mono text-white">${maxPayout.toFixed(2)}</p>
+          </div>
+          <div className="bg-gray-800 rounded-lg p-3 text-center">
+            <p className="text-xs text-gray-500">Net profit</p>
+            <p className="text-sm font-mono text-emerald-400">+${netProfit.toFixed(2)}</p>
+          </div>
+          <div className="bg-gray-800 rounded-lg p-3 text-center">
+            <p className="text-xs text-gray-500">Joint prob</p>
+            <p className="text-sm font-mono text-gray-200">
+              {s.joint_prob !== undefined ? (s.joint_prob * 100).toFixed(1) : '—'}%
+            </p>
+          </div>
+        </div>
+
+        {error && (
+          <div className="flex items-start gap-2 bg-red-500/10 border border-red-500/40 rounded-lg px-3 py-2">
+            <span className="text-red-400 shrink-0">✕</span>
+            <p className="text-sm text-red-400">{error}</p>
+          </div>
+        )}
+
+        <div className="flex gap-3">
+          <button
+            onClick={onClose}
+            className="flex-1 py-2 rounded-lg text-sm text-gray-400 border border-gray-700 hover:border-gray-500"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleConfirm}
+            disabled={loading || stake <= 0 || stake > bankroll}
+            className="flex-1 py-2 rounded-lg text-sm font-semibold bg-indigo-600 hover:bg-indigo-500 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {loading ? 'Placing…' : 'Confirm Bet'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 // ── UI components ─────────────────────────────────────────────────────────────
@@ -180,7 +312,18 @@ function PickRow({ pick }: { pick: PropResult }) {
   )
 }
 
-function PowerCard({ s }: { s: ParlaySuggestion }) {
+function PlaceBetButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className="w-full mt-1 py-2 rounded-lg text-sm font-semibold bg-indigo-600 hover:bg-indigo-500 text-white transition-colors"
+    >
+      Paper Trade
+    </button>
+  )
+}
+
+function PowerCard({ s, onBet }: { s: ParlaySuggestion; onBet: () => void }) {
   const mult = POWER_MULTIPLIERS[s.n_picks]
   const evColor = s.ev_pct >= 5 ? 'text-emerald-400' : s.ev_pct >= 0 ? 'text-yellow-400' : 'text-gray-500'
 
@@ -214,11 +357,12 @@ function PowerCard({ s }: { s: ParlaySuggestion }) {
         Breakeven per pick: {(powerBreakeven(s.n_picks, mult) * 100).toFixed(1)}%
       </p>
       {s.same_game_warning && <SameGameWarning />}
+      <PlaceBetButton onClick={onBet} />
     </div>
   )
 }
 
-function FlexCard({ s }: { s: ParlaySuggestion }) {
+function FlexCard({ s, onBet }: { s: ParlaySuggestion; onBet: () => void }) {
   const evColor = s.ev_pct >= 5 ? 'text-emerald-400' : s.ev_pct >= 0 ? 'text-yellow-400' : 'text-gray-500'
   const outcomes = s.outcome_probs ?? []
 
@@ -270,6 +414,7 @@ function FlexCard({ s }: { s: ParlaySuggestion }) {
         </div>
       </div>
       {s.same_game_warning && <SameGameWarning />}
+      <PlaceBetButton onClick={onBet} />
     </div>
   )
 }
@@ -287,8 +432,33 @@ function SameGameWarning() {
 
 // ── main component ────────────────────────────────────────────────────────────
 
-export default function ParlayOptimizer({ props }: Props) {
-  const [playType, setPlayType] = useState<PlayType>('power')
+export default function ParlayOptimizer({ props, currentBankroll = 100, onBetPlaced }: Props) {
+  const [playType, setPlayType]         = useState<PlayType>('power')
+  const [activeBet, setActiveBet]       = useState<ParlaySuggestion | null>(null)
+
+  async function handlePlaceBet(s: ParlaySuggestion, stake: number) {
+    const payload: import('../api').PlaceBetPayload = {
+      play_type:  s.play_type,
+      n_picks:    s.n_picks,
+      picks:      s.picks.map(p => ({
+        player_name:  p.player_name,
+        stat_type:    p.stat_type,
+        line_score:   p.line_score,
+        direction:    p.direction,
+        sport:        p.sport,
+        odds_type:    p.odds_type,
+        blended_prob: p.blended_prob,
+        game_date:    p.game_date,
+        matchup:      p.matchup ?? '',
+      })),
+      stake,
+      multiplier:  s.multiplier,
+      joint_prob:  s.joint_prob ?? 0,
+      ev_pct:      s.ev_pct,
+    }
+    await placePaperBet(payload)
+    onBetPlaced?.()
+  }
 
   const powerSuggestions = ([2, 3, 4, 5] as const)
     .map(n => computePowerParlay(props, n))
@@ -350,8 +520,8 @@ export default function ParlayOptimizer({ props }: Props) {
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
           {suggestions.map(s =>
             s.play_type === 'power'
-              ? <PowerCard key={s.n_picks} s={s} />
-              : <FlexCard  key={s.n_picks} s={s} />
+              ? <PowerCard key={s.n_picks} s={s} onBet={() => setActiveBet(s)} />
+              : <FlexCard  key={s.n_picks} s={s} onBet={() => setActiveBet(s)} />
           )}
         </div>
       )}
@@ -360,6 +530,15 @@ export default function ParlayOptimizer({ props }: Props) {
         Half-Kelly sizing maximizes long-run bankroll growth while protecting against model error.
         {playType === 'flex' && ' Flex EV uses full binomial expansion across all outcome combinations.'}
       </p>
+
+      {activeBet && (
+        <BetModal
+          suggestion={activeBet}
+          bankroll={currentBankroll}
+          onConfirm={stake => handlePlaceBet(activeBet, stake)}
+          onClose={() => setActiveBet(null)}
+        />
+      )}
     </div>
   )
 }

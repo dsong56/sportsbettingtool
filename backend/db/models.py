@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import Column, Integer, Float, String, DateTime, JSON, UniqueConstraint
+from sqlalchemy import Column, Integer, Float, String, DateTime, JSON, UniqueConstraint, Boolean
 from sqlalchemy.orm import DeclarativeBase
 
 
@@ -104,3 +104,55 @@ class ScrapeJob(Base):
     started_at = Column(DateTime)
     finished_at= Column(DateTime)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class PaperSettings(Base):
+    """Single-row table storing the paper trading bankroll state."""
+    __tablename__ = "paper_settings"
+
+    id                = Column(Integer, primary_key=True)
+    starting_bankroll = Column(Float, nullable=False, default=100.0)
+    current_bankroll  = Column(Float, nullable=False, default=100.0)
+    updated_at        = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class PaperBet(Base):
+    """A paper-traded parlay (Power Play or Flex Play)."""
+    __tablename__ = "paper_bets"
+
+    id               = Column(Integer, primary_key=True)
+    play_type        = Column(String, nullable=False)   # 'power' | 'flex'
+    n_picks          = Column(Integer, nullable=False)
+    picks            = Column(JSON, nullable=False)     # list of pick dicts
+    stake            = Column(Float, nullable=False)    # $ amount wagered
+    multiplier       = Column(Float, nullable=False)    # e.g. 3.0 for 2-pick power
+    potential_payout = Column(Float, nullable=False)    # stake * multiplier (max for flex)
+    joint_prob       = Column(Float)                    # estimated probability at placement
+    ev_pct           = Column(Float)                    # EV% at placement
+    placed_at        = Column(DateTime, default=datetime.utcnow, nullable=False)
+    # Settlement
+    status           = Column(String, default="pending")  # pending | won | lost | partial
+    hits             = Column(Integer)                    # how many picks actually hit
+    actual_payout    = Column(Float)                      # 0 if lost, stake*mult if won
+    profit_loss      = Column(Float)                      # actual_payout - stake
+    bankroll_after   = Column(Float)                      # bankroll snapshot post-settlement
+    settled_at       = Column(DateTime)
+
+
+class SportsbookLine(Base):
+    """Best available line per prop across all sportsbooks."""
+    __tablename__ = "sportsbook_lines"
+
+    id          = Column(Integer, primary_key=True)
+    player_name = Column(String, nullable=False)
+    stat_type   = Column(String, nullable=False)
+    line_score  = Column(Float, nullable=False)
+    sport       = Column(String, nullable=False)
+    direction   = Column(String, nullable=False)   # 'Over' | 'Under'
+    best_book   = Column(String, nullable=False)   # book offering the best EV
+    best_odds   = Column(Integer, nullable=False)  # American odds at best_book
+    market_prob = Column(Float)                    # devigged consensus true probability
+    ev_pct      = Column(Float)                    # (true_prob * decimal_odds - 1) * 100
+    kelly_pct   = Column(Float)                    # half-Kelly % of bankroll
+    n_books     = Column(Integer)                  # how many books posted this prop
+    computed_at = Column(DateTime, default=datetime.utcnow, nullable=False)

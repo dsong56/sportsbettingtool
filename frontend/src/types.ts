@@ -7,7 +7,7 @@ export interface PropResult {
   sport:           string
   direction:       'Over' | 'Under'
   odds_type:       OddsType
-  game_date:       string
+  game_date?:      string   // not persisted in DB, only present immediately after scrape
   matchup:         string
   market_prob:     number
   historical_prob: number
@@ -44,3 +44,18 @@ export interface Job {
 }
 
 export type Sport = 'NBA' | 'NHL' | 'MLB'
+
+export interface SportsbookLine {
+  player_name: string
+  stat_type:   string
+  line_score:  number
+  sport:       string
+  direction:   'Over' | 'Under'
+  best_book:   string
+  best_odds:   number   // American
+  market_prob: number
+  ev_pct:      number
+  kelly_pct:   number
+  n_books:     number
+  computed_at: string
+}

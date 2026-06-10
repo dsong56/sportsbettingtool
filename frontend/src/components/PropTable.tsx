@@ -5,7 +5,9 @@ import OddsTypeBadge from './OddsTypeBadge'
 import PropCard from './PropCard'
 
 interface Props {
-  props: PropResult[]
+  props:       PropResult[]
+  slipPicks?:  PropResult[]
+  onAddToSlip?: (prop: PropResult) => void
 }
 
 type SortKey = 'ev_pct' | 'blended_prob' | 'market_prob' | 'historical_prob' | 'player_name'
@@ -55,9 +57,13 @@ function SortHeader({
   )
 }
 
-export default function PropTable({ props }: Props) {
+export default function PropTable({ props, slipPicks = [], onAddToSlip }: Props) {
   const [sortKey, setSortKey] = useState<SortKey>('ev_pct')
   const [expanded, setExpanded] = useState<string | null>(null)
+
+  const inSlip = new Set(slipPicks.map(p =>
+    `${p.player_name}|${p.stat_type}|${p.line_score}|${p.direction}`
+  ))
 
   const sorted = [...props].sort((a, b) => {
     if (sortKey === 'player_name') return a.player_name.localeCompare(b.player_name)
@@ -83,6 +89,7 @@ export default function PropTable({ props }: Props) {
             <th className="px-3 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Signal</th>
             <th className="px-3 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Kelly 2-pick</th>
             <th className="px-3 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Sport</th>
+            {onAddToSlip && <th className="px-3 py-3 w-8" />}
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-800/50">
@@ -138,6 +145,20 @@ export default function PropTable({ props }: Props) {
                     {prop.kelly_2pick.toFixed(1)}%
                   </td>
                   <td className="px-3 py-3 text-gray-500 text-xs">{prop.sport}</td>
+                  {onAddToSlip && (
+                    <td className="px-2 py-3" onClick={e => e.stopPropagation()}>
+                      {inSlip.has(`${prop.player_name}|${prop.stat_type}|${prop.line_score}|${prop.direction}`) ? (
+                        <span className="text-indigo-400 text-xs font-bold leading-none">✓</span>
+                      ) : (
+                        <button
+                          onClick={() => onAddToSlip(prop)}
+                          className="text-gray-600 hover:text-indigo-400 transition-colors font-bold text-base leading-none"
+                        >
+                          +
+                        </button>
+                      )}
+                    </td>
+                  )}
                 </tr>
 
                 {isOpen && (

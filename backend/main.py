@@ -3,7 +3,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.db.database import init_db
-from backend.routers import jobs, props, admin
+from backend.routers import jobs, props, admin, paper, lines
 from backend.jobs.resolver import start_nightly_resolver
 
 
@@ -27,6 +27,8 @@ app.add_middleware(
 app.include_router(jobs.router)
 app.include_router(props.router)
 app.include_router(admin.router)
+app.include_router(paper.router)
+app.include_router(lines.router)
 
 
 @app.get("/health")
