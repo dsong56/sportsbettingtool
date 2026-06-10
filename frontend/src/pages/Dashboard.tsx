@@ -136,13 +136,13 @@ export default function Dashboard({ onNavigatePortfolio }: { onNavigatePortfolio
   useEffect(() => {
     if (!jobId) return
     let polls = 0
-    const MAX_POLLS = 72  // 3 minutes at 2.5s intervals
+    const MAX_POLLS = 240  // 10 minutes at 2.5s intervals
     const interval = setInterval(() => {
       polls++
       if (polls > MAX_POLLS) {
         clearInterval(interval)
         setJobStatus('failed')
-        setJobError('Refresh timed out after 3 minutes — the scrape may still be running in the background')
+        setJobError('Refresh timed out after 10 minutes — the scrape may still be running in the background')
         setJobId(null)
         return
       }

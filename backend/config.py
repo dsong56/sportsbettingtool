@@ -75,6 +75,12 @@ class Settings(BaseSettings):
     alt_min_books: int = 2              # min books in consensus before trusting an alt line
     alt_fallback_overround: float = 1.06  # assumed two-way overround when no main line exists
 
+    # --- Odds API quota control ---
+    # The events endpoint returns games up to ~8 days out; fetching odds for all
+    # of them is slow and the API bills per market returned (~17/game with alts).
+    # Only scan games starting within this window.
+    odds_lookahead_hours: int = 24
+
     # --- Kelly ---
     kelly_fraction_multiplier: float = 0.5   # half-Kelly for safety
     kelly_max: float = 0.25                  # hard cap regardless

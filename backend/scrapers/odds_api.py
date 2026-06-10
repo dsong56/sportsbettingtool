@@ -11,6 +11,7 @@ HTTP round trips.
 
 Returns raw prop rows: (player_name, direction, line, odds, book, stat_type, sport, is_alt)
 """
+from datetime import datetime, timedelta, timezone
 from typing import NamedTuple
 import asyncio
 import httpx
@@ -129,11 +130,20 @@ def _raise_for_systemic(resp: httpx.Response, context: str) -> None:
 
 
 async def _get_game_ids(client: httpx.AsyncClient, sport_slug: str) -> list[str]:
-    """1 request — returns all upcoming game IDs for the sport."""
+    """1 request — returns game IDs starting within the lookahead window.
+
+    Unfiltered, the events endpoint returns games up to ~8 days out; fetching
+    odds for all of them is slow and burns quota (billed per market returned).
+    """
+    now = datetime.now(timezone.utc)
+    fmt = "%Y-%m-%dT%H:%M:%SZ"
     resp = await client.get(
         f"{_BASE}/{sport_slug}/events",
-        params={"apiKey": ODDS_API_KEY, "regions": "us",
-                "markets": "h2h", "oddsFormat": "american"},
+        params={
+            "apiKey": ODDS_API_KEY,
+            "commenceTimeFrom": now.strftime(fmt),
+            "commenceTimeTo": (now + timedelta(hours=settings.odds_lookahead_hours)).strftime(fmt),
+        },
     )
     _raise_for_systemic(resp, f"events lookup for {sport_slug}")
     if resp.status_code != 200:
@@ -221,7 +231,10 @@ async def fetch_odds(sport: str) -> list[OddsProp]:
     async with httpx.AsyncClient(timeout=30) as client:
         game_ids = await _get_game_ids(client, sport_slug)
         if not game_ids:
-            raise OddsAPIError(f"The Odds API returned no upcoming {sport} games.")
+            raise OddsAPIError(
+                f"The Odds API returned no {sport} games starting in the next "
+                f"{settings.odds_lookahead_hours}h."
+            )
 
         # Fetch all markets for all games concurrently, chunked to be polite
         tasks = [

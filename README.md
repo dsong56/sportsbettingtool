@@ -152,7 +152,7 @@ frontend/
 
 ## Notes
 
-- The Odds API free tier allows ~500 requests/month. Each refresh uses 10–20 HTTP requests depending on how many games are active, but **quota** is billed per market × region — alternate markets ride in the same batched request yet roughly double the quota cost. Set `INCLUDE_ALT_LINES=false` to ration the free tier.
+- The Odds API free tier allows ~500 quota credits/month, and **quota is billed per market returned × region** — a single game with all standard + alternate markets can cost ~17 credits. A full-slate MLB refresh with alt lines can therefore consume 200+ credits. Mitigations: only games starting within `odds_lookahead_hours` (default 24h) are scanned, and `INCLUDE_ALT_LINES=false` roughly halves the cost. Watch the usage dashboard at the-odds-api.com while testing.
 - Alternate-line EVs lean on one-sided devigging (no Under price to anchor against), so they're inherently noisier than main-line EVs — treat a +4% alt line with more skepticism than a +4% main line.
 - Flex Play payout multipliers in `frontend/src/components/ParlayOptimizer.tsx` should be verified against the current PrizePicks payout table before use — they change periodically.
 - The ML layer (LightGBM) activates once the `predictions` table accumulates ~500 resolved outcomes. Until then, fixed blend weights are used. The nightly resolver job automatically logs outcomes by querying the stats APIs.
