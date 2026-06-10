@@ -112,6 +112,22 @@ class OddsProp(NamedTuple):
     is_alt:      bool = False   # True for alternate-line (15+/20+) markets
 
 
+class OddsAPIError(RuntimeError):
+    """Systemic Odds API failure (bad key, quota, invalid market) — fail the job loudly."""
+
+
+def _raise_for_systemic(resp: httpx.Response, context: str) -> None:
+    """401/403 = bad key or quota, 422 = invalid market key (body names it).
+
+    These affect every request, so surface them instead of silently returning
+    no props — otherwise the refresh job reports success over an empty table.
+    """
+    if resp.status_code in (401, 403, 422, 429):
+        raise OddsAPIError(
+            f"Odds API {context} failed with HTTP {resp.status_code}: {resp.text[:300]}"
+        )
+
+
 async def _get_game_ids(client: httpx.AsyncClient, sport_slug: str) -> list[str]:
     """1 request — returns all upcoming game IDs for the sport."""
     resp = await client.get(
@@ -119,8 +135,11 @@ async def _get_game_ids(client: httpx.AsyncClient, sport_slug: str) -> list[str]
         params={"apiKey": ODDS_API_KEY, "regions": "us",
                 "markets": "h2h", "oddsFormat": "american"},
     )
+    _raise_for_systemic(resp, f"events lookup for {sport_slug}")
     if resp.status_code != 200:
-        return []
+        raise OddsAPIError(
+            f"Odds API events lookup for {sport_slug} returned HTTP {resp.status_code}: {resp.text[:300]}"
+        )
     return [g["id"] for g in resp.json()]
 
 
@@ -155,7 +174,9 @@ async def _get_all_markets_for_game(
         # An alternate market key wasn't recognized — retry with standard markets only
         # rather than losing the whole game.
         resp = await _fetch(list(market_map.values()))
+    _raise_for_systemic(resp, f"odds fetch for game {game_id}")
     if resp.status_code != 200:
+        # Transient per-game issues (e.g. game started/removed) — skip just this game
         return []
 
     results: list[OddsProp] = []
@@ -188,13 +209,19 @@ async def fetch_odds(sport: str) -> list[OddsProp]:
     Request count: 1 (game IDs) + n_games (one batched call each).
     Previously: 1 + n_games × n_markets.
     """
+    if not ODDS_API_KEY:
+        raise OddsAPIError(
+            "ODDS_API_KEY is not set. Add it to .env in the project root — note the file "
+            "is read relative to the directory you launch uvicorn from."
+        )
+
     sport_slug, market_map = SPORT_CONFIG[sport]
     alt_market_map = ALT_MARKET_CONFIG.get(sport, {}) if settings.include_alt_lines else {}
 
     async with httpx.AsyncClient(timeout=30) as client:
         game_ids = await _get_game_ids(client, sport_slug)
         if not game_ids:
-            return []
+            raise OddsAPIError(f"The Odds API returned no upcoming {sport} games.")
 
         # Fetch all markets for all games concurrently, chunked to be polite
         tasks = [
