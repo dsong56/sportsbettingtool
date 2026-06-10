@@ -10,7 +10,9 @@ import math
 import pytest
 from datetime import datetime, UTC, timedelta
 
-from backend.ev.shin import american_to_implied, power_devig, weighted_market_prob
+from backend.ev.shin import (
+    american_to_implied, power_devig, power_k, devig_one_sided, weighted_market_prob,
+)
 from backend.ev.historical import compute_hit_rate, rolling_window_rates
 from backend.ev.movement import compute_movement_signal
 from backend.ev.blend import EVResult, breakeven, kelly_fraction
@@ -57,6 +59,39 @@ def test_power_devig_no_vig_passthrough():
     """If total implied prob ≤ 1 (no vig), fall back to normalization."""
     p_o, p_u = power_devig(0.48, 0.48)   # sum = 0.96, no vig
     assert abs(p_o - 0.5) < 1e-6
+
+
+# ── power_k / devig_one_sided (alternate lines) ──────────────────────────────
+
+def test_power_k_consistent_with_power_devig():
+    """Applying k from power_k must reproduce power_devig's output."""
+    p_o_raw = american_to_implied(-150)
+    p_u_raw = american_to_implied(+130)
+    k = power_k(p_o_raw, p_u_raw)
+    assert k is not None and k > 1.0
+    p_o, p_u = power_devig(p_o_raw, p_u_raw)
+    assert abs(p_o_raw ** k - p_o) < 1e-9
+    assert abs(p_u_raw ** k - p_u) < 1e-9
+
+def test_power_k_none_when_no_vig():
+    assert power_k(0.48, 0.48) is None
+
+def test_devig_one_sided_with_k_shrinks_implied():
+    """Devigging a one-sided +250 alt quote must reduce its implied probability."""
+    p_raw = american_to_implied(+250)          # ~0.286 with vig
+    k = power_k(american_to_implied(-115), american_to_implied(-105))
+    p_true = devig_one_sided(p_raw, k, fallback_overround=1.06)
+    assert p_true < p_raw
+    assert 0 < p_true < 1
+
+def test_devig_one_sided_fallback_overround():
+    """Without a main-line k, falls back to dividing by the assumed overround."""
+    p_true = devig_one_sided(0.53, None, fallback_overround=1.06)
+    assert abs(p_true - 0.53 / 1.06) < 1e-9
+
+def test_devig_one_sided_clamped():
+    assert devig_one_sided(0.999, None, fallback_overround=1.0) < 1.0
+    assert devig_one_sided(1e-9, None, fallback_overround=1.06) > 0.0
 
 
 # ── weighted_market_prob ─────────────────────────────────────────────────────

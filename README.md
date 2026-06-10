@@ -1,6 +1,6 @@
-# EV Bets — PrizePicks EV Scanner
+# EV Bets — Player Prop EV Scanner
 
-A web app that identifies +EV betting opportunities on PrizePicks by cross-referencing player prop lines against sharp sportsbook odds, historical hit rates, and line movement signals. Surfaces optimal Power Play and Flex Play parlays sized by the Kelly criterion.
+A web app that identifies +EV betting opportunities across PrizePicks **and** traditional sportsbooks by cross-referencing player prop lines against sharp sportsbook odds, historical hit rates, and line movement signals. Surfaces optimal Power Play and Flex Play parlays sized by the Kelly criterion, plus best-price straight bets — including alternate lines (15+/20+ points style ladders) — across every book The Odds API covers.
 
 ## How it works
 
@@ -12,6 +12,9 @@ A web app that identifies +EV betting opportunities on PrizePicks by cross-refer
    - **Steam detection** — fires when ≥3 books move in the same direction within a 30-minute window, with a boost when a sharp book initiates the move
    - **Blended probability** — market signal + historical signal + movement nudge, with weights that scale dynamically with sample size
 4. **Parlay optimizer** — recommends optimal Power Play and Flex Play combinations sized by half-Kelly criterion
+5. **Sportsbooks mode** — scans every prop posted by every book (not just ones matching a PrizePicks line) and flags books priced softer than the devigged market consensus:
+   - **Main lines** — standard two-way devig per book, sharpness-weighted consensus
+   - **Alternate lines** (15+/20+ points etc.) — these ladders are usually quoted Over-only, so there's no Under to devig against. Each book's vig exponent *k* is solved from its own main line on the same prop and applied to the one-sided alt price; books without a main line fall back to a configurable assumed overround. Alt lines require at least 2 books in the consensus before being surfaced.
 
 ## Supported sports
 
@@ -28,6 +31,7 @@ A web app that identifies +EV betting opportunities on PrizePicks by cross-refer
 - **Sparklines** — odds movement history per prop
 - **Parlay optimizer** — Power Play (2–5 pick) and Flex Play (3–6 pick) recommendations with full outcome breakdowns for Flex
 - **Kelly sizing** — half-Kelly bet sizing per parlay tier with breakeven thresholds
+- **Sportsbooks tab** — best-price straight bet per prop across all books, with main/alt line filtering, "20+ Points"-style alt formatting, and per-row EV/Kelly breakdowns
 
 ## Setup
 
@@ -76,6 +80,7 @@ Frontend runs at `http://localhost:5173`.
 ODDS_API_KEY=your_odds_api_key
 BALLDONTLIE_API_KEY=your_balldontlie_key
 DATABASE_URL=sqlite+aiosqlite:///./ev_bets.db
+INCLUDE_ALT_LINES=true   # alternate (15+/20+) markets — roughly doubles quota cost per refresh
 ```
 
 ## Usage
@@ -115,9 +120,11 @@ backend/
 │   ├── historical.py       Decay-weighted hit rate + Beta prior
 │   ├── movement.py         Steam detection
 │   ├── blend.py            Signal blending + Kelly + breakevens
-│   └── pipeline.py         Full scrape → EV → DB pipeline
+│   ├── pipeline.py         Full scrape → EV → DB pipeline (PrizePicks mode)
+│   └── sportsbook_pipeline.py  Best-line scan across books, main + alt lines
 ├── routers/
 │   ├── props.py            GET /api/props
+│   ├── lines.py            GET /api/lines, POST /api/lines/refresh/{sport}
 │   ├── jobs.py             POST /api/refresh, GET /api/jobs/{id}
 │   └── admin.py            Name corrections, outcome logging
 ├── db/
@@ -145,7 +152,8 @@ frontend/
 
 ## Notes
 
-- The Odds API free tier allows ~500 requests/month. Each refresh uses 10–20 requests depending on how many games are active.
+- The Odds API free tier allows ~500 requests/month. Each refresh uses 10–20 HTTP requests depending on how many games are active, but **quota** is billed per market × region — alternate markets ride in the same batched request yet roughly double the quota cost. Set `INCLUDE_ALT_LINES=false` to ration the free tier.
+- Alternate-line EVs lean on one-sided devigging (no Under price to anchor against), so they're inherently noisier than main-line EVs — treat a +4% alt line with more skepticism than a +4% main line.
 - Flex Play payout multipliers in `frontend/src/components/ParlayOptimizer.tsx` should be verified against the current PrizePicks payout table before use — they change periodically.
 - The ML layer (LightGBM) activates once the `predictions` table accumulates ~500 resolved outcomes. Until then, fixed blend weights are used. The nightly resolver job automatically logs outcomes by querying the stats APIs.
 - Market efficiency is highest on popular players. Edge tends to come from lower-profile props where books price lazily.

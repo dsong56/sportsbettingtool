@@ -86,6 +86,7 @@ export default function Dashboard({ onNavigatePortfolio }: { onNavigatePortfolio
   const [toast, setToast]         = useState<{ message: string; type: 'success' | 'error' } | null>(null)
   const [slipPicks, setSlipPicks] = useState<PropResult[]>([])
   const [mode, setMode]           = useState<Mode>('prizepicks')
+  const [lineType, setLineType]   = useState<'All' | 'Main' | 'Alt'>('All')
 
   const { data: paperSummary } = useQuery({
     queryKey: ['paper-summary'],
@@ -311,6 +312,12 @@ export default function Dashboard({ onNavigatePortfolio }: { onNavigatePortfolio
                 <option value="Over">Over only</option>
                 <option value="Under">Under only</option>
               </select>
+              <select value={lineType} onChange={e => setLineType(e.target.value as 'All' | 'Main' | 'Alt')}
+                className="bg-gray-900 border border-gray-700 text-gray-300 text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+                <option value="All">Main &amp; alt lines</option>
+                <option value="Main">Main lines only</option>
+                <option value="Alt">Alt lines only (15+/20+)</option>
+              </select>
               {sbFetching && (
                 <span className="text-xs text-gray-500 flex items-center gap-1.5">
                   <span className="inline-block w-3 h-3 border-2 border-gray-700 border-t-indigo-500 rounded-full animate-spin" />
@@ -329,7 +336,10 @@ export default function Dashboard({ onNavigatePortfolio }: { onNavigatePortfolio
             </div>
 
             <SportsbookTable
-              lines={sbLines.filter(l => direction === 'All' || l.direction === direction)}
+              lines={sbLines.filter(l =>
+                (direction === 'All' || l.direction === direction) &&
+                (lineType === 'All' || (lineType === 'Alt') === l.is_alt)
+              )}
             />
             {sbLines.length === 0 && !sbFetching && (
               <div className="text-center py-20 text-gray-600 space-y-3">

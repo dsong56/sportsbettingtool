@@ -67,6 +67,7 @@ async def get_lines(
     stat_type: str | None = Query(None),
     direction: str | None = Query(None),
     book:      str | None = Query(None),
+    line_type: str | None = Query(None, description="'main' | 'alt' | None for both"),
     min_ev:    float      = Query(-999.0),
     db: AsyncSession = Depends(get_db),
 ):
@@ -82,13 +83,17 @@ async def get_lines(
         stmt = stmt.where(SportsbookLine.direction == direction)
     if book:
         stmt = stmt.where(SportsbookLine.best_book.ilike(f"%{book}%"))
+    if line_type == "main":
+        stmt = stmt.where(SportsbookLine.is_alt.is_(False))
+    elif line_type == "alt":
+        stmt = stmt.where(SportsbookLine.is_alt.is_(True))
 
     rows = (await db.execute(stmt)).scalars().all()
 
     seen: set[tuple] = set()
     results = []
     for r in rows:
-        key = (r.player_name, r.stat_type, r.line_score, r.direction, r.sport)
+        key = (r.player_name, r.stat_type, r.line_score, r.direction, r.sport, bool(r.is_alt))
         if key in seen:
             continue
         seen.add(key)
@@ -100,6 +105,7 @@ async def get_lines(
             "line_score":  r.line_score,
             "sport":       r.sport,
             "direction":   r.direction,
+            "is_alt":      bool(r.is_alt),
             "best_book":   r.best_book,
             "best_odds":   r.best_odds,
             "market_prob": r.market_prob,

@@ -23,6 +23,22 @@ function formatOdds(odds: number): string {
   return odds > 0 ? `+${odds}` : `${odds}`
 }
 
+// Alt Over lines read naturally as a threshold: Over 19.5 Points → "20+ Points"
+function formatProp(line: SportsbookLine): string {
+  if (line.is_alt && line.direction === 'Over' && line.line_score % 1 !== 0) {
+    return `${Math.ceil(line.line_score)}+ ${line.stat_type}`
+  }
+  return `${line.line_score} ${line.stat_type}`
+}
+
+function AltBadge() {
+  return (
+    <span className="ml-1.5 text-[10px] font-bold uppercase tracking-wide px-1 py-0.5 rounded bg-purple-500/20 text-purple-400">
+      Alt
+    </span>
+  )
+}
+
 function DirectionChip({ direction }: { direction: string }) {
   const isOver = direction === 'Over'
   return (
@@ -116,7 +132,7 @@ export default function SportsbookTable({ lines }: Props) {
   })
 
   const rowKey = (l: SportsbookLine) =>
-    `${l.player_name}|${l.stat_type}|${l.line_score}|${l.direction}|${l.sport}`
+    `${l.player_name}|${l.stat_type}|${l.line_score}|${l.direction}|${l.sport}|${l.is_alt ? 'alt' : 'main'}`
 
   return (
     <div className="w-full overflow-x-auto rounded-xl border border-gray-800">
@@ -149,7 +165,8 @@ export default function SportsbookTable({ lines }: Props) {
                     {line.player_name}
                   </td>
                   <td className="px-3 py-3 text-gray-400 whitespace-nowrap">
-                    {line.line_score} {line.stat_type}
+                    {formatProp(line)}
+                    {line.is_alt && <AltBadge />}
                   </td>
                   <td className="px-3 py-3">
                     <DirectionChip direction={line.direction} />

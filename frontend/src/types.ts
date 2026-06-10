@@ -51,6 +51,7 @@ export interface SportsbookLine {
   line_score:  number
   sport:       string
   direction:   'Over' | 'Under'
+  is_alt:      boolean  // alternate (15+/20+) line vs the book's main line
   best_book:   string
   best_odds:   number   // American
   market_prob: number

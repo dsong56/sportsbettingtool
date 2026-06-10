@@ -30,14 +30,16 @@ def american_to_implied(odds: int) -> float:
     return 100 / (odds + 100)
 
 
-def power_devig(p_over_raw: float, p_under_raw: float) -> tuple[float, float]:
-    """Return (true_p_over, true_p_under) via the power method.
+def power_k(p_over_raw: float, p_under_raw: float) -> float | None:
+    """Solve for the power-method vig exponent k > 1 of a two-way market.
 
-    Falls back to simple normalization on degenerate inputs (no vig or bad data).
+    Returns None on degenerate inputs (no vig, or solver failure). The exponent
+    characterizes how much vig the book bakes into each outcome, so it can be
+    reused to devig one-sided quotes (alternate lines) from the same book.
     """
     total = p_over_raw + p_under_raw
     if total <= 1.0 + 1e-9:
-        return p_over_raw / total, p_under_raw / total
+        return None
 
     def f(k: float) -> float:
         return (p_over_raw ** k) + (p_under_raw ** k) - 1.0
@@ -45,10 +47,35 @@ def power_devig(p_over_raw: float, p_under_raw: float) -> tuple[float, float]:
     try:
         # At k=1: sum = total > 1. As k grows both terms shrink toward 0.
         # brentq finds the unique k > 1 where they sum to exactly 1.
-        k = brentq(f, 1.0, 10.0, xtol=1e-9, maxiter=50)
-        return p_over_raw ** k, p_under_raw ** k
+        return brentq(f, 1.0, 10.0, xtol=1e-9, maxiter=50)
     except (ValueError, RuntimeError):
+        return None
+
+
+def power_devig(p_over_raw: float, p_under_raw: float) -> tuple[float, float]:
+    """Return (true_p_over, true_p_under) via the power method.
+
+    Falls back to simple normalization on degenerate inputs (no vig or bad data).
+    """
+    k = power_k(p_over_raw, p_under_raw)
+    if k is None:
+        total = p_over_raw + p_under_raw
         return p_over_raw / total, p_under_raw / total
+    return p_over_raw ** k, p_under_raw ** k
+
+
+def devig_one_sided(p_raw: float, k: float | None, fallback_overround: float) -> float:
+    """Devig a one-sided quote (alternate lines are usually Over-only).
+
+    Uses the book's vig exponent k from its main line on the same prop when
+    available; otherwise divides by an assumed two-way overround.
+    Result is clamped to (0, 1).
+    """
+    if k is not None and k > 1.0:
+        p = p_raw ** k
+    else:
+        p = p_raw / fallback_overround
+    return min(max(p, 1e-6), 1.0 - 1e-6)
 
 
 def devig_book_odds(over_odds: int | None, under_odds: int | None) -> tuple[float, float] | None:

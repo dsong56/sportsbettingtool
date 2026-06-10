@@ -4,13 +4,18 @@ Unified Odds API scraper for NBA, NHL, MLB.
 Batches all stat markets into a single request per game — reducing API usage
 from (n_games × n_markets) calls down to (n_games + 1) calls per refresh.
 
-Returns raw prop rows: (player_name, direction, line, odds, book, stat_type, sport)
+Also fetches alternate markets (player_points_alternate etc.) — the "15+ / 20+
+points" style props. These ride along in the same batched request per game, so
+they add quota cost (the Odds API bills per market × region) but no extra
+HTTP round trips.
+
+Returns raw prop rows: (player_name, direction, line, odds, book, stat_type, sport, is_alt)
 """
 from typing import NamedTuple
 import asyncio
 import httpx
 
-from backend.config import ODDS_API_KEY
+from backend.config import ODDS_API_KEY, settings
 
 _BASE = "https://api.the-odds-api.com/v4/sports"
 
@@ -39,7 +44,7 @@ SPORT_CONFIG: dict[str, tuple[str, dict[str, str]]] = {
             "Points":           "player_points",
             "Blocked Shots":    "player_blocked_shots",
             "Assists":          "player_assists",
-            "Goals":            "player_goal_scorer_anytime",
+            "Goals":            "player_goals",
         },
     ),
     "MLB": (
@@ -61,6 +66,41 @@ SPORT_CONFIG: dict[str, tuple[str, dict[str, str]]] = {
 }
 
 
+# Alternate-line markets: same stat, but books quote a ladder of lines
+# (e.g. 15+, 20+, 25+ points). Usually Over-only.
+# stat_type label → odds-api alternate market key, per sport.
+ALT_MARKET_CONFIG: dict[str, dict[str, str]] = {
+    "NBA": {
+        "Points":           "player_points_alternate",
+        "Rebounds":         "player_rebounds_alternate",
+        "Assists":          "player_assists_alternate",
+        "3-PT Made":        "player_threes_alternate",
+        "Blocked Shots":    "player_blocks_alternate",
+        "Steals":           "player_steals_alternate",
+        "Pts+Rebs+Asts":    "player_points_rebounds_assists_alternate",
+        "Pts+Rebs":         "player_points_rebounds_alternate",
+        "Pts+Asts":         "player_points_assists_alternate",
+        "Rebs+Asts":        "player_rebounds_assists_alternate",
+    },
+    "NHL": {
+        "Shots on Goal":    "player_shots_on_goal_alternate",
+        "Saves":            "player_total_saves_alternate",
+        "Points":           "player_points_alternate",
+        "Blocked Shots":    "player_blocked_shots_alternate",
+        "Assists":          "player_assists_alternate",
+        "Goals":            "player_goals_alternate",
+    },
+    "MLB": {
+        "Pitcher Strikeouts": "pitcher_strikeouts_alternate",
+        "Total Bases":        "batter_total_bases_alternate",
+        "Hits Allowed":       "pitcher_hits_allowed_alternate",
+        "Hits":               "batter_hits_alternate",
+        "RBIs":               "batter_rbis_alternate",
+        "Walks":              "batter_walks_alternate",
+    },
+}
+
+
 class OddsProp(NamedTuple):
     player_name: str
     direction:   str    # 'Over' | 'Under'
@@ -69,6 +109,7 @@ class OddsProp(NamedTuple):
     book:        str
     stat_type:   str    # PrizePicks label
     sport:       str
+    is_alt:      bool = False   # True for alternate-line (15+/20+) markets
 
 
 async def _get_game_ids(client: httpx.AsyncClient, sport_slug: str) -> list[str]:
@@ -87,41 +128,56 @@ async def _get_all_markets_for_game(
     client: httpx.AsyncClient,
     sport_slug: str,
     game_id: str,
-    market_map: dict[str, str],   # {pp_stat: odds_api_key}
+    market_map: dict[str, str],       # {pp_stat: odds_api_key} — standard markets
+    alt_market_map: dict[str, str],   # {pp_stat: odds_api_key} — alternate markets
     sport: str,
 ) -> list[OddsProp]:
-    """1 request per game — fetches all markets in a single batched call."""
-    # Build reverse lookup: odds_api_key → pp_stat_type
-    api_key_to_pp = {v: k for k, v in market_map.items()}
-    markets_param = ",".join(market_map.values())
+    """1 request per game — fetches standard + alternate markets in a single batched call."""
+    # Reverse lookups: odds_api_key → (pp_stat_type, is_alt)
+    api_key_to_pp: dict[str, tuple[str, bool]] = {
+        v: (k, False) for k, v in market_map.items()
+    }
+    api_key_to_pp.update({v: (k, True) for k, v in alt_market_map.items()})
 
-    resp = await client.get(
-        f"{_BASE}/{sport_slug}/events/{game_id}/odds",
-        params={
-            "apiKey":      ODDS_API_KEY,
-            "regions":     "us",
-            "markets":     markets_param,
-            "oddsFormat":  "american",
-        },
-    )
+    async def _fetch(markets: list[str]) -> httpx.Response:
+        return await client.get(
+            f"{_BASE}/{sport_slug}/events/{game_id}/odds",
+            params={
+                "apiKey":      ODDS_API_KEY,
+                "regions":     "us",
+                "markets":     ",".join(markets),
+                "oddsFormat":  "american",
+            },
+        )
+
+    resp = await _fetch(list(market_map.values()) + list(alt_market_map.values()))
+    if resp.status_code == 422 and alt_market_map:
+        # An alternate market key wasn't recognized — retry with standard markets only
+        # rather than losing the whole game.
+        resp = await _fetch(list(market_map.values()))
     if resp.status_code != 200:
         return []
 
     results: list[OddsProp] = []
     for bm in resp.json().get("bookmakers", []):
         for mkt in bm["markets"]:
-            pp_stat = api_key_to_pp.get(mkt["key"])
-            if pp_stat is None:
+            mapped = api_key_to_pp.get(mkt["key"])
+            if mapped is None:
                 continue
+            pp_stat, is_alt = mapped
             for oc in mkt["outcomes"]:
+                point = oc.get("point")
+                if point is None or oc["name"] not in ("Over", "Under"):
+                    continue   # yes/no markets (e.g. anytime scorer) don't fit the O/U model
                 results.append(OddsProp(
                     player_name=oc["description"],
                     direction=oc["name"],
-                    line=float(oc["point"]),
+                    line=float(point),
                     odds=int(oc["price"]),
                     book=bm["title"],
                     stat_type=pp_stat,
                     sport=sport,
+                    is_alt=is_alt,
                 ))
     return results
 
@@ -133,6 +189,7 @@ async def fetch_odds(sport: str) -> list[OddsProp]:
     Previously: 1 + n_games × n_markets.
     """
     sport_slug, market_map = SPORT_CONFIG[sport]
+    alt_market_map = ALT_MARKET_CONFIG.get(sport, {}) if settings.include_alt_lines else {}
 
     async with httpx.AsyncClient(timeout=30) as client:
         game_ids = await _get_game_ids(client, sport_slug)
@@ -141,7 +198,7 @@ async def fetch_odds(sport: str) -> list[OddsProp]:
 
         # Fetch all markets for all games concurrently, chunked to be polite
         tasks = [
-            _get_all_markets_for_game(client, sport_slug, gid, market_map, sport)
+            _get_all_markets_for_game(client, sport_slug, gid, market_map, alt_market_map, sport)
             for gid in game_ids
         ]
         results: list[OddsProp] = []

@@ -66,6 +66,15 @@ class Settings(BaseSettings):
     steam_noise_floor: float  = 0.005   # ignore moves < 0.5pp implied prob
     steam_sharp_boost: float  = 1.25    # boost signal when sharp book moved first
 
+    # --- Alternate lines (15+ / 20+ style markets) ---
+    # Alternate markets are usually quoted one-sided (Over only), so there's no
+    # Under price to devig against. We borrow the book's vig exponent k from its
+    # main line on the same prop; if the book has no main line, we fall back to
+    # dividing by a typical per-book overround.
+    include_alt_lines: bool = True
+    alt_min_books: int = 2              # min books in consensus before trusting an alt line
+    alt_fallback_overround: float = 1.06  # assumed two-way overround when no main line exists
+
     # --- Kelly ---
     kelly_fraction_multiplier: float = 0.5   # half-Kelly for safety
     kelly_max: float = 0.25                  # hard cap regardless

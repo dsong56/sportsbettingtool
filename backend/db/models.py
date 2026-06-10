@@ -149,6 +149,7 @@ class SportsbookLine(Base):
     line_score  = Column(Float, nullable=False)
     sport       = Column(String, nullable=False)
     direction   = Column(String, nullable=False)   # 'Over' | 'Under'
+    is_alt      = Column(Boolean, default=False, nullable=False)  # alternate (15+/20+) line
     best_book   = Column(String, nullable=False)   # book offering the best EV
     best_odds   = Column(Integer, nullable=False)  # American odds at best_book
     market_prob = Column(Float)                    # devigged consensus true probability
