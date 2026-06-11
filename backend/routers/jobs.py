@@ -62,10 +62,12 @@ async def _run_job(job_id: str, sport: str):
             await run_pipeline(sport, db)
             job.status = "done"
         except Exception as exc:
+            # Roll back the broken transaction FIRST — rollback discards any
+            # uncommitted attribute changes, so setting status before it would
+            # leave the job stuck in 'running' forever.
+            await db.rollback()
             job.status = "failed"
             job.error = _friendly_error(exc)
-            # Roll back any broken transaction before updating job status
-            await db.rollback()
         finally:
             job.finished_at = _now()
             await db.commit()

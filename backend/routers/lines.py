@@ -35,9 +35,11 @@ async def _run_lines_job(job_id: str, sport: str):
             await run_sportsbook_pipeline(sport, db)
             job.status = "done"
         except Exception as exc:
+            # Rollback FIRST: it discards uncommitted attribute changes, so
+            # setting status before it would leave the job stuck in 'running'.
+            await db.rollback()
             job.status = "failed"
             job.error = str(exc)
-            await db.rollback()
         finally:
             job.finished_at = _now()
             await db.commit()
