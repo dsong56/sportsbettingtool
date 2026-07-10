@@ -35,7 +35,7 @@ from backend.scrapers.odds_api import fetch_odds
 from backend.ev.shin import devig_book_odds, weighted_market_prob
 from backend.ev.historical import compute_hit_rate, rolling_window_rates
 from backend.ev.movement import compute_movement_signal
-from backend.ev.blend import EVResult, breakeven
+from backend.ev.blend import EVResult, breakeven, kelly_fraction
 from backend.db.models import OddsSnapshot, EVResult as EVResultModel, Prediction, GameLogCache
 
 _SUFFIXES = {"jr", "sr", "ii", "iii", "iv"}
@@ -93,7 +93,7 @@ def _resolve_name(
 # ---------- stats dispatch ----------
 
 async def _get_game_logs(player_name: str, sport: str, db: AsyncSession) -> list[dict]:
-    from backend.stats import nba, nhl, mlb
+    from backend.stats import nba, nhl, mlb, nfl
 
     cached = (await db.execute(
         select(GameLogCache)
@@ -108,6 +108,7 @@ async def _get_game_logs(player_name: str, sport: str, db: AsyncSession) -> list
         case "NBA": logs = await nba.fetch_game_logs(player_name)
         case "NHL": logs = await nhl.fetch_game_logs(player_name)
         case "MLB": logs = await mlb.fetch_game_logs(player_name)
+        case "NFL": logs = await nfl.fetch_game_logs(player_name)
         case _:     logs = []
 
     if logs:
@@ -124,12 +125,43 @@ async def _get_game_logs(player_name: str, sport: str, db: AsyncSession) -> list
 
 
 def _get_stat_fn(sport: str):
-    from backend.stats import nba, nhl, mlb
+    from backend.stats import nba, nhl, mlb, nfl
     match sport:
         case "NBA": return nba._extract_stat
         case "NHL": return nhl.get_stat_value
         case "MLB": return mlb.get_stat_value
+        case "NFL": return nfl.get_stat_value
     raise ValueError(f"Unknown sport: {sport}")
+
+
+def _maybe_apply_ml(ev: EVResult, sport: str, direction: str) -> EVResult:
+    """
+    When the ML model is enabled and loadable, replace the weighted blend with
+    the model's probability (and recompute the derived EV/Kelly numbers).
+    Any failure falls back silently to the untouched blend.
+    """
+    from backend.ev import ml_model
+
+    try:
+        if not ml_model.ml_enabled():
+            return ev
+        feats = ml_model.build_features(
+            ev.market_prob, ev.historical_prob, ev.movement_signal,
+            ev.sample_n, sport, direction,
+        )
+        if feats is None:
+            return ev
+        prob = ml_model.predict_prob(feats)
+        if prob is None:
+            return ev
+        ev.blended_prob = prob
+        ev.ev_pct = (prob - breakeven(2)) * 100
+        ev.kelly_2pick = kelly_fraction(prob, 2) * 100
+        ev.kelly_3pick = kelly_fraction(prob, 3) * 100
+        ev.kelly_4pick = kelly_fraction(prob, 4) * 100
+    except Exception:
+        pass
+    return ev
 
 
 def _minutes_flag(logs: list[dict], sport: str) -> bool:
@@ -254,6 +286,7 @@ async def run_pipeline(sport: str, db: AsyncSession) -> list[dict]:
 
                 # --- Blend ---
                 ev = EVResult(market_prob, hist_prob, movement, sample_n)
+                ev = _maybe_apply_ml(ev, sport, direction)
 
                 # --- Persist odds snapshots ---
                 for book, o_odds in over_by_book.items():
@@ -275,6 +308,7 @@ async def run_pipeline(sport: str, db: AsyncSession) -> list[dict]:
                     line_score=line, sport=sport, direction=direction,
                     odds_type=proj.odds_type,
                     matchup=proj.matchup,
+                    game_date=proj.game_date,
                     market_prob=ev.market_prob,
                     historical_prob=ev.historical_prob,
                     movement_signal=ev.movement_signal,
@@ -286,6 +320,12 @@ async def run_pipeline(sport: str, db: AsyncSession) -> list[dict]:
                     kelly_4pick=ev.kelly_4pick,
                     sample_n=sample_n,
                     minutes_flag=int(min_flag),
+                    roll_l5=round(roll_rates.get(5,  0) * 100, 1),
+                    roll_l10=round(roll_rates.get(10, 0) * 100, 1),
+                    roll_l20=round(roll_rates.get(20, 0) * 100, 1),
+                    breakeven_2pick=round(breakeven(2) * 100, 2),
+                    breakeven_3pick=round(breakeven(3) * 100, 2),
+                    breakeven_4pick=round(breakeven(4) * 100, 2),
                     computed_at=now,
                 ))
 
@@ -297,6 +337,7 @@ async def run_pipeline(sport: str, db: AsyncSession) -> list[dict]:
                     market_prob=ev.market_prob,
                     historical_prob=ev.historical_prob,
                     movement_signal=ev.movement_signal,
+                    sample_n=sample_n,
                     game_date=proj.game_date,
                     predicted_at=now,
                 ))

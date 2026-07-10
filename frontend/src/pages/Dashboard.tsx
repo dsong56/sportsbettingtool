@@ -6,12 +6,13 @@ import ParlayOptimizer from '../components/ParlayOptimizer'
 import Toast from '../components/Toast'
 import type { Sport, PropResult } from '../types'
 
-const SPORTS: Sport[] = ['NBA', 'NHL', 'MLB']
+const SPORTS: Sport[] = ['NBA', 'NHL', 'MLB', 'NFL']
 
 const SPORT_STATS: Record<Sport, string[]> = {
   NBA: ['All', 'Points', 'Rebounds', 'Assists', '3-PT Made', 'Blocked Shots', 'Steals', 'Pts+Rebs+Asts', 'Pts+Rebs', 'Pts+Asts', 'Rebs+Asts'],
   NHL: ['All', 'Shots on Goal', 'Saves', 'Points', 'Blocked Shots', 'Assists', 'Goals'],
   MLB: ['All', 'Pitcher Strikeouts', 'Total Bases', 'Hits Allowed', 'Pitcher Outs', 'Hits+Runs+RBIs'],
+  NFL: ['All', 'Passing Yards', 'Rushing Yards', 'Receiving Yards', 'Receptions', 'Touchdowns', 'Completions', 'Interceptions'],
 }
 
 type JobStatus = 'idle' | 'pending' | 'running' | 'done' | 'failed'

@@ -24,7 +24,11 @@ async def get_props(
     min_ev:    float      = Query(-999.0),
     db: AsyncSession = Depends(get_db),
 ):
-    stmt = select(EVResult).order_by(desc(EVResult.ev_pct), desc(EVResult.computed_at))
+    stmt = (
+        select(EVResult)
+        .where(EVResult.ev_pct >= min_ev)
+        .order_by(desc(EVResult.ev_pct), desc(EVResult.computed_at))
+    )
     if sport:
         stmt = stmt.where(EVResult.sport == sport.upper())
     if stat_type:
@@ -42,9 +46,6 @@ async def get_props(
         if key in seen:
             continue
         seen.add(key)
-        ev_pct = r.ev_pct or 0
-        if ev_pct < min_ev:
-            continue
         results.append({
             "player_name":     r.player_name,
             "stat_type":       r.stat_type,
@@ -53,6 +54,7 @@ async def get_props(
             "direction":       r.direction,
             "odds_type":       r.odds_type or "standard",
             "matchup":         r.matchup or "",
+            "game_date":       r.game_date or "",
             "market_prob":     r.market_prob,
             "historical_prob": r.historical_prob,
             "movement_signal": r.movement_signal,
@@ -64,6 +66,12 @@ async def get_props(
             "kelly_4pick":     r.kelly_4pick,
             "sample_n":        r.sample_n,
             "minutes_flag":    r.minutes_flag,
+            "roll_l5":         r.roll_l5 or 0,
+            "roll_l10":        r.roll_l10 or 0,
+            "roll_l20":        r.roll_l20 or 0,
+            "breakeven_2pick": r.breakeven_2pick or round(breakeven(2) * 100, 2),
+            "breakeven_3pick": r.breakeven_3pick or round(breakeven(3) * 100, 2),
+            "breakeven_4pick": r.breakeven_4pick or round(breakeven(4) * 100, 2),
             "computed_at":     r.computed_at,
         })
 

@@ -1,5 +1,8 @@
 import axios from 'axios'
-import type { PropResult, OddsPoint, Job, Sport } from './types'
+import type {
+  PropResult, OddsPoint, Job, Sport,
+  BetLog, BetInput, PredictionsSummary, UnresolvedPrediction, TrainResult,
+} from './types'
 
 const http = axios.create({ baseURL: '/api' })
 
@@ -36,5 +39,34 @@ export async function triggerRefresh(sport: Sport): Promise<Job> {
 
 export async function pollJob(jobId: string): Promise<Job> {
   const { data } = await http.get<Job>(`/jobs/${jobId}`)
+  return data
+}
+
+export async function fetchBets(status: 'all' | 'open' | 'settled' = 'all'): Promise<BetLog[]> {
+  const { data } = await http.get<BetLog[]>('/bets', { params: { status } })
+  return data
+}
+
+export async function createBet(bet: BetInput): Promise<BetLog> {
+  const { data } = await http.post<BetLog>('/bets', bet)
+  return data
+}
+
+export async function fetchPredictionsSummary(): Promise<PredictionsSummary> {
+  const { data } = await http.get<PredictionsSummary>('/predictions/summary')
+  return data
+}
+
+export async function fetchUnresolvedPredictions(): Promise<UnresolvedPrediction[]> {
+  const { data } = await http.get<UnresolvedPrediction[]>('/predictions/unresolved')
+  return data
+}
+
+export async function resolvePrediction(predId: number, actualResult: 'over' | 'under'): Promise<void> {
+  await http.post(`/admin/outcomes/${predId}`, { actual_result: actualResult })
+}
+
+export async function trainMlModel(): Promise<TrainResult> {
+  const { data } = await http.post<TrainResult>('/admin/train')
   return data
 }

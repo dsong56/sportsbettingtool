@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     private_books: set[str] = {"mybookie.ag", "betonline.ag", "bovada", "superbook"}
 
     # --- PrizePicks league IDs ---
-    league_ids: dict[str, int] = {"NBA": 7, "NHL": 8, "MLB": 2}
+    league_ids: dict[str, int] = {"NBA": 7, "NHL": 8, "MLB": 2, "NFL": 9}
 
     # --- PrizePicks Power Play payout multipliers ---
     # breakeven_per_pick(n) = (1 / multiplier)^(1/n)
@@ -79,8 +79,11 @@ class Settings(BaseSettings):
     name_match_warn_below: float = 0.85
 
     # --- ML migration ---
+    # The pipeline also auto-enables ML when the model file exists on disk,
+    # unless USE_ML_MODEL is explicitly set to false in the environment/.env.
     use_ml_model: bool = False
     ml_min_resolved_predictions: int = 500
+    ml_model_path: str = "ml_model.pkl"  # relative paths resolve to the repo root
 
 
 settings = Settings()

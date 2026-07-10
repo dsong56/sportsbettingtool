@@ -43,4 +43,87 @@ export interface Job {
   finished_at?: string
 }
 
-export type Sport = 'NBA' | 'NHL' | 'MLB'
+export type Sport = 'NBA' | 'NHL' | 'MLB' | 'NFL'
+
+export interface BetLog {
+  id:                    number
+  player_name:           string
+  stat_type:             string
+  line_score:            number
+  sport:                 string
+  direction:             'Over' | 'Under'
+  odds_type:             OddsType
+  pick_count:            number
+  stake_pct:             number
+  game_date:             string | null
+  ev_pct_at_entry:       number | null
+  blended_prob_at_entry: number | null
+  actual_result:         'over' | 'under' | null
+  settled_at:            string | null
+  created_at:            string
+}
+
+export interface BetInput {
+  player_name: string
+  stat_type:   string
+  line_score:  number
+  sport:       string
+  direction:   'Over' | 'Under'
+  pick_count:  number
+  stake_pct:   number
+}
+
+export interface CalibrationBucket {
+  prob_bin:      number
+  predicted_avg: number
+  actual_rate:   number
+  count:         number
+}
+
+export interface SignalAttribution {
+  market_correlation:     number | null
+  market_n:               number
+  historical_correlation: number | null
+  historical_n:           number
+  movement_correlation:   number | null
+  movement_n:             number
+}
+
+export interface RollingAccuracyPoint {
+  date:     string
+  win_rate: number
+  count:    number
+}
+
+export interface MlStatus {
+  active:       boolean
+  model_exists: boolean
+  min_required: number
+}
+
+export interface PredictionsSummary {
+  total_resolved:      number
+  win_rate:            number
+  brier_score:         number
+  calibration_buckets: CalibrationBucket[]
+  signal_attribution:  SignalAttribution
+  rolling_accuracy:    RollingAccuracyPoint[]
+  ml:                  MlStatus
+}
+
+export interface UnresolvedPrediction {
+  id:             number
+  player_name:    string
+  stat_type:      string
+  line_score:     number
+  sport:          string
+  direction:      'Over' | 'Under'
+  game_date:      string | null
+  predicted_prob: number
+}
+
+export interface TrainResult {
+  trained:   boolean
+  n_samples: number
+  accuracy:  number
+}

@@ -34,6 +34,7 @@ class EVResult(Base):
     direction        = Column(String, nullable=False)
     odds_type        = Column(String, default="standard")  # standard | demon | goblin
     matchup          = Column(String, default="")           # e.g. "DET/BOS"
+    game_date        = Column(String)                       # YYYY-MM-DD
     market_prob      = Column(Float)   # Shin-devigged weighted market probability
     historical_prob  = Column(Float)   # rolling hit-rate model
     movement_signal  = Column(Float)   # [-1, 1] steam direction
@@ -45,6 +46,12 @@ class EVResult(Base):
     kelly_4pick      = Column(Float)
     sample_n         = Column(Integer) # game log sample used for historical
     minutes_flag     = Column(Integer, default=0)  # 1 = recent minutes trending down
+    roll_l5          = Column(Float)   # last-5 hit rate, percent
+    roll_l10         = Column(Float)
+    roll_l20         = Column(Float)
+    breakeven_2pick  = Column(Float)   # breakeven per-pick prob, percent
+    breakeven_3pick  = Column(Float)
+    breakeven_4pick  = Column(Float)
     computed_at      = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
@@ -62,6 +69,7 @@ class Prediction(Base):
     market_prob    = Column(Float)
     historical_prob= Column(Float)
     movement_signal= Column(Float)
+    sample_n       = Column(Integer)   # historical sample size, an ML feature
     predicted_at   = Column(DateTime, default=datetime.utcnow, nullable=False)
     game_date      = Column(String)
     actual_result  = Column(String)    # 'over' | 'under' | None (pending)
@@ -91,6 +99,27 @@ class NameCorrection(Base):
     raw_name       = Column(String, nullable=False)
     canonical_name = Column(String, nullable=False)
     sport          = Column(String, nullable=False)
+
+
+class BetLog(Base):
+    """A bet the user actually placed, snapshotted at entry for portfolio tracking."""
+    __tablename__ = "bet_logs"
+
+    id                     = Column(Integer, primary_key=True)
+    player_name            = Column(String, nullable=False)
+    stat_type              = Column(String, nullable=False)
+    line_score             = Column(Float, nullable=False)
+    sport                  = Column(String, nullable=False)
+    direction              = Column(String, nullable=False)   # 'Over' | 'Under'
+    odds_type              = Column(String, default="standard")
+    pick_count             = Column(Integer, nullable=False)  # 2 | 3 | 4
+    stake_pct              = Column(Float, nullable=False)    # Kelly % used
+    game_date              = Column(String)                   # YYYY-MM-DD
+    ev_pct_at_entry        = Column(Float)
+    blended_prob_at_entry  = Column(Float)
+    actual_result          = Column(String)    # 'over' | 'under' | None (open)
+    settled_at             = Column(DateTime)
+    created_at             = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
 class ScrapeJob(Base):
