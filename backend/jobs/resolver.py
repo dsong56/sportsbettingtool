@@ -119,26 +119,30 @@ async def _resolve_predictions(db: AsyncSession):
 
 
 async def _cleanup_old_snapshots(db: AsyncSession):
-    """Delete OddsSnapshot rows older than the retention window, in batches
+    """Delete scrape-artifact rows older than the retention window, in batches
     (commit per batch so a large first-time purge doesn't hold the DB lock)."""
+    from backend.db.models import SportsbookLine
+
     cutoff = datetime.utcnow() - timedelta(days=SNAPSHOT_RETENTION_DAYS)
-    total = 0
-    while True:
-        batch_ids = (
-            select(OddsSnapshot.id)
-            .where(OddsSnapshot.snapshot_at < cutoff)
-            .limit(_CLEANUP_BATCH)
-            .scalar_subquery()
-        )
-        result = await db.execute(delete(OddsSnapshot).where(OddsSnapshot.id.in_(batch_ids)))
-        await db.commit()
-        deleted = result.rowcount or 0
-        total += deleted
-        if deleted < _CLEANUP_BATCH:
-            break
-    if total:
-        log.info("Cleanup: deleted %d odds snapshots older than %d days",
-                 total, SNAPSHOT_RETENTION_DAYS)
+    for model, ts_col in ((OddsSnapshot, OddsSnapshot.snapshot_at),
+                          (SportsbookLine, SportsbookLine.computed_at)):
+        total = 0
+        while True:
+            batch_ids = (
+                select(model.id)
+                .where(ts_col < cutoff)
+                .limit(_CLEANUP_BATCH)
+                .scalar_subquery()
+            )
+            result = await db.execute(delete(model).where(model.id.in_(batch_ids)))
+            await db.commit()
+            deleted = result.rowcount or 0
+            total += deleted
+            if deleted < _CLEANUP_BATCH:
+                break
+        if total:
+            log.info("Cleanup: deleted %d %s rows older than %d days",
+                     total, model.__tablename__, SNAPSHOT_RETENTION_DAYS)
 
 
 async def _nightly_loop():

@@ -1,10 +1,15 @@
+import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.db.database import init_db
-from backend.routers import jobs, props, admin, bets, predictions
+from backend.routers import jobs, props, admin, bets, predictions, sportsbook
 from backend.jobs.resolver import start_nightly_resolver
+
+# uvicorn only configures its own loggers — without this, INFO logs from the
+# app (credit counts, resolver activity) never reach the console
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
 
 @asynccontextmanager
@@ -29,6 +34,7 @@ app.include_router(props.router)
 app.include_router(admin.router)
 app.include_router(bets.router)
 app.include_router(predictions.router)
+app.include_router(sportsbook.router)
 
 
 @app.get("/health")

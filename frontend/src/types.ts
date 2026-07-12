@@ -41,6 +41,24 @@ export interface Job {
   error?:      string
   started_at?: string
   finished_at?: string
+  credits_remaining?: string | null
+}
+
+export interface SportsbookLineRow {
+  player_name:       string
+  stat_type:         string
+  line_score:        number
+  sport:             string
+  direction:         'Over' | 'Under'
+  book:              string
+  odds:              number
+  fair_odds:         number
+  consensus_prob:    number
+  historical_prob:   number
+  ev_pct:            number
+  kelly_pct:         number
+  n_books_consensus: number
+  computed_at:       string
 }
 
 export type Sport = 'NBA' | 'NHL' | 'MLB' | 'NFL'

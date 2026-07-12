@@ -69,7 +69,9 @@ async def _run_job(job_id: str, sport: str):
             job.status = "failed"
             job.error = _friendly_error(exc)
         finally:
+            from backend.scrapers import odds_api
             job.finished_at = _now()
+            job.credits_remaining = odds_api.last_credits_remaining
             await db.commit()
 
 
@@ -98,10 +100,11 @@ async def get_job(job_id: str, db: AsyncSession = Depends(get_db)):
     if not job:
         raise HTTPException(404, "Job not found")
     return {
-        "job_id":      job.id,
-        "sport":       job.sport,
-        "status":      job.status,
-        "error":       job.error,
-        "started_at":  job.started_at,
-        "finished_at": job.finished_at,
+        "job_id":            job.id,
+        "sport":             job.sport,
+        "status":            job.status,
+        "error":             job.error,
+        "started_at":        job.started_at,
+        "finished_at":       job.finished_at,
+        "credits_remaining": job.credits_remaining,
     }

@@ -1,6 +1,6 @@
 import axios from 'axios'
 import type {
-  PropResult, OddsPoint, Job, Sport,
+  PropResult, OddsPoint, Job, Sport, SportsbookLineRow,
   BetLog, BetInput, PredictionsSummary, UnresolvedPrediction, TrainResult,
 } from './types'
 
@@ -39,6 +39,22 @@ export async function triggerRefresh(sport: Sport): Promise<Job> {
 
 export async function pollJob(jobId: string): Promise<Job> {
   const { data } = await http.get<Job>(`/jobs/${jobId}`)
+  return data
+}
+
+export async function fetchSportsbookLines(params: {
+  sport?: Sport
+  book?: string
+  stat_type?: string
+  direction?: string
+  min_ev?: number
+}): Promise<SportsbookLineRow[]> {
+  const { data } = await http.get<SportsbookLineRow[]>('/sportsbook', { params })
+  return data
+}
+
+export async function fetchSportsbookBooks(sport?: Sport): Promise<string[]> {
+  const { data } = await http.get<string[]>('/sportsbook/books', { params: { sport } })
   return data
 }
 

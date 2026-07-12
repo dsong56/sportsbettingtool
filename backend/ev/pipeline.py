@@ -398,5 +398,84 @@ async def run_pipeline(sport: str, db: AsyncSession) -> list[dict]:
                     "breakeven_4pick": round(breakeven(4) * 100, 2),
                 })
 
+    # --- Sportsbook mode: score every book's price against the sharp consensus
+    # of the other books at the same line. Reuses the odds already fetched, so
+    # this costs zero extra API credits. Skipped on cache-reuse runs — the odds
+    # are identical, recomputing would only duplicate rows. ---
+    if not reused_snapshots:
+        await _compute_sportsbook_lines(
+            db, sport, over_odds_map, under_odds_map, stat_fn, now,
+        )
+
     await db.commit()
     return sorted(results, key=lambda x: x["ev_pct"], reverse=True)
+
+
+def _american_to_decimal(odds: int) -> float:
+    return 1 + (odds / 100 if odds > 0 else 100 / -odds)
+
+
+async def _compute_sportsbook_lines(
+    db: AsyncSession,
+    sport: str,
+    over_odds_map: dict,
+    under_odds_map: dict,
+    stat_fn,
+    now: datetime,
+) -> None:
+    from backend.db.models import SportsbookLine
+    from backend.ev.historical import compute_hit_rate
+
+    for base_key in set(over_odds_map) & set(under_odds_map):
+        player, stat_type, line = base_key
+        over_by_book  = over_odds_map[base_key]
+        under_by_book = under_odds_map[base_key]
+
+        book_probs: dict[str, tuple[float, float]] = {}
+        for book in set(over_by_book) & set(under_by_book):
+            if book.lower() in PRIVATE_BOOKS:
+                continue
+            p = devig_book_odds(over_by_book[book], under_by_book[book])
+            if p:
+                book_probs[book] = p
+
+        # Need the target book plus at least one other for a consensus
+        if len(book_probs) < 2:
+            continue
+
+        try:
+            logs = await _get_game_logs(player, sport, db)
+        except Exception:
+            logs = []
+        hist_over,  _ = compute_hit_rate(logs, stat_type, line, "Over",  stat_fn)
+        hist_under, _ = compute_hit_rate(logs, stat_type, line, "Under", stat_fn)
+
+        for book, _probs in book_probs.items():
+            others = {b: pp for b, pp in book_probs.items() if b != book}
+            cons_over, cons_under, n_cons = weighted_market_prob(
+                others, BOOK_WEIGHTS, BOOK_WEIGHT_DEFAULT
+            )
+
+            for direction, offered, cons_p, hist_p in (
+                ("Over",  over_by_book[book],  cons_over,  hist_over),
+                ("Under", under_by_book[book], cons_under, hist_under),
+            ):
+                dec = _american_to_decimal(offered)
+                ev = cons_p * dec - 1
+                full_kelly = ev / (dec - 1) if dec > 1 else 0.0
+                kelly = 0.0
+                if full_kelly > 0:
+                    kelly = min(
+                        full_kelly * settings.kelly_fraction_multiplier,
+                        settings.kelly_max,
+                    )
+                db.add(SportsbookLine(
+                    player_name=player, stat_type=stat_type, line_score=line,
+                    sport=sport, direction=direction, book=book, odds=offered,
+                    consensus_prob=round(cons_p, 4),
+                    ev_pct=round(ev * 100, 2),
+                    kelly_pct=round(kelly * 100, 2),
+                    historical_prob=round(hist_p, 4),
+                    n_books_consensus=n_cons,
+                    computed_at=now,
+                ))

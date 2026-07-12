@@ -133,3 +133,27 @@ class ScrapeJob(Base):
     started_at = Column(DateTime)
     finished_at= Column(DateTime)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    credits_remaining = Column(String)   # Odds API quota left after this scrape
+
+
+class SportsbookLine(Base):
+    """
+    A single book's price on a prop, scored against the sharp consensus of the
+    OTHER books at the same line. Positive ev_pct = this book's price is soft.
+    """
+    __tablename__ = "sportsbook_lines"
+
+    id              = Column(Integer, primary_key=True)
+    player_name     = Column(String, nullable=False)
+    stat_type       = Column(String, nullable=False)
+    line_score      = Column(Float, nullable=False)
+    sport           = Column(String, nullable=False)
+    direction       = Column(String, nullable=False)   # 'Over' | 'Under'
+    book            = Column(String, nullable=False)
+    odds            = Column(Integer, nullable=False)  # American odds offered
+    consensus_prob  = Column(Float)    # devigged, sharp-weighted, excl. this book
+    ev_pct          = Column(Float)    # (consensus_prob × decimal − 1) × 100
+    kelly_pct       = Column(Float)    # half-Kelly at the offered price, %
+    historical_prob = Column(Float)    # player hit rate at this line, for context
+    n_books_consensus = Column(Integer)
+    computed_at     = Column(DateTime, default=datetime.utcnow, nullable=False)

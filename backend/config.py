@@ -36,7 +36,12 @@ class Settings(BaseSettings):
     # request only markets present on the PrizePicks board, only games starting
     # within the window, and reuse odds scraped within the cache TTL for free.
     odds_window_hours: int  = 24   # only fetch games starting within this window
-    odds_cache_minutes: int = 10   # reuse snapshots newer than this, no API call
+    odds_cache_minutes: int = 30   # reuse snapshots newer than this, no API call
+
+    # Markets to never request, even when on the PrizePicks board — each one
+    # costs 1 credit per game per scrape. E.g. {"Singles", "Doubles", "Walks"}
+    # trims ~30% off a full MLB scrape.
+    odds_markets_exclude: set[str] = set()
 
     # --- PrizePicks Power Play payout multipliers ---
     # breakeven_per_pick(n) = (1 / multiplier)^(1/n)

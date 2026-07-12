@@ -18,6 +18,10 @@ log = logging.getLogger(__name__)
 
 _BASE = "https://api.the-odds-api.com/v4/sports"
 
+# Most recent x-requests-remaining seen on any Odds API response.
+# Surfaced on the scrape job so the frontend can display it.
+last_credits_remaining: str | None = None
+
 # sport key → (odds-api sport slug, {pp_stat_type: odds_api_market_key})
 SPORT_CONFIG: dict[str, tuple[str, dict[str, str]]] = {
     "NBA": (
@@ -103,10 +107,16 @@ async def _get_game_ids(client: httpx.AsyncClient, sport_slug: str) -> list[str]
     )
     if resp.status_code != 200:
         return []
+    _track_credits(resp)
+    return [g["id"] for g in resp.json()]
+
+
+def _track_credits(resp: httpx.Response) -> None:
+    global last_credits_remaining
     remaining = resp.headers.get("x-requests-remaining")
     if remaining is not None:
+        last_credits_remaining = remaining
         log.info("Odds API credits remaining: %s", remaining)
-    return [g["id"] for g in resp.json()]
 
 
 async def _get_all_markets_for_game(
@@ -132,6 +142,7 @@ async def _get_all_markets_for_game(
     )
     if resp.status_code != 200:
         return []
+    _track_credits(resp)
 
     results: list[OddsProp] = []
     for bm in resp.json().get("bookmakers", []):
@@ -170,6 +181,9 @@ async def fetch_odds(sport: str, stat_types: set[str] | None = None) -> list[Odd
     sport_slug, market_map = SPORT_CONFIG[sport]
     if stat_types is not None:
         market_map = {k: v for k, v in market_map.items() if k in stat_types}
+    if settings.odds_markets_exclude:
+        market_map = {k: v for k, v in market_map.items()
+                      if k not in settings.odds_markets_exclude}
     if not market_map:
         return []
 
