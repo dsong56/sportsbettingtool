@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { isAxiosError } from 'axios'
 import { createBet } from '../api'
@@ -34,13 +34,14 @@ export default function BetSlip({ prefill, onClose, onLogged }: Props) {
   )
   const [error, setError]           = useState<string | null>(null)
 
-  // When the pick count changes on a prefilled slip, default the stake to that
+  // On a prefilled slip, changing the pick count re-defaults the stake to that
   // tier's Kelly fraction
-  useEffect(() => {
+  const selectPickCount = (n: number) => {
+    setPickCount(n)
     if (prefill) {
-      setStakePct(Math.max(0.1, kellyForPickCount(prefill, pickCount)).toFixed(1))
+      setStakePct(Math.max(0.1, kellyForPickCount(prefill, n)).toFixed(1))
     }
-  }, [pickCount, prefill])
+  }
 
   const mutation = useMutation({
     mutationFn: (bet: BetInput) => createBet(bet),
@@ -156,7 +157,7 @@ export default function BetSlip({ prefill, onClose, onLogged }: Props) {
               {PICK_COUNTS.map(n => (
                 <button
                   key={n}
-                  onClick={() => setPickCount(n)}
+                  onClick={() => selectPickCount(n)}
                   className={`flex-1 py-2 rounded-lg text-sm font-semibold transition-colors ${
                     pickCount === n ? 'bg-indigo-600 text-white' : 'bg-gray-800 text-gray-400'
                   }`}

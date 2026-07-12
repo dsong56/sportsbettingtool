@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { fetchProps, triggerRefresh, pollJob } from '../api'
 import PropTable from '../components/PropTable'
 import ParlayOptimizer from '../components/ParlayOptimizer'
+import BetSlip from '../components/BetSlip'
 import Toast from '../components/Toast'
 import type { Sport, PropResult } from '../types'
 
@@ -80,6 +81,7 @@ export default function Dashboard() {
   const [jobError, setJobError]   = useState<string | null>(null)
   const [lastUpdated, setLastUpdated] = useState<string | null>(null)
   const [toast, setToast]         = useState<{ message: string; type: 'success' | 'error' } | null>(null)
+  const [betProp, setBetProp]     = useState<PropResult | null>(null)
 
   // Reset stat filter when sport changes
   useEffect(() => { setStatType('All') }, [sport])
@@ -153,16 +155,13 @@ export default function Dashboard() {
   }).length
 
   return (
-    <div className="min-h-screen bg-gray-950 text-gray-200">
+    <div>
 
-      {/* Header */}
-      <header className="border-b border-gray-800 bg-gray-900/60 backdrop-blur sticky top-0 z-10">
-        <div className="max-w-screen-xl mx-auto px-6 py-4 flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <span className="text-2xl font-bold text-white tracking-tight">EV Bets</span>
-            <span className="text-xs text-gray-500 bg-gray-800 px-2 py-0.5 rounded-full">PrizePicks</span>
-          </div>
+      {/* Sport bar */}
+      <div className="border-b border-gray-800 bg-gray-900/40">
+        <div className="max-w-screen-xl mx-auto px-6 py-3 flex items-center justify-between gap-4">
           <div className="flex items-center gap-2">
+            <span className="text-xs text-gray-500 bg-gray-800 px-2 py-0.5 rounded-full mr-1">PrizePicks</span>
             {SPORTS.map(s => (
               <SportTab key={s} sport={s} active={sport === s} onClick={() => setSport(s)} />
             ))}
@@ -176,7 +175,7 @@ export default function Dashboard() {
             <RefreshButton status={jobStatus} onClick={handleRefresh} />
           </div>
         </div>
-      </header>
+      </div>
 
       <main className="max-w-screen-xl mx-auto px-6 py-6 space-y-6">
 
@@ -258,7 +257,7 @@ export default function Dashboard() {
         </div>
 
         {/* Main table */}
-        <PropTable props={props} />
+        <PropTable props={props} onLogBet={setBetProp} />
 
         {/* Empty state when no data has been fetched yet */}
         {props.length === 0 && !isFetching && (
@@ -269,6 +268,14 @@ export default function Dashboard() {
           </div>
         )}
       </main>
+
+      {betProp && (
+        <BetSlip
+          prefill={betProp}
+          onClose={() => setBetProp(null)}
+          onLogged={() => setToast({ message: 'Bet logged — see Portfolio', type: 'success' })}
+        />
+      )}
 
       {toast && (
         <Toast

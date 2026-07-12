@@ -6,6 +6,7 @@ import OddsTypeBadge from './OddsTypeBadge'
 
 interface Props {
   prop: PropResult
+  onLogBet?: (prop: PropResult) => void
 }
 
 function ProbBar({ label, value, color }: { label: string; value: number; color: string }) {
@@ -22,7 +23,7 @@ function ProbBar({ label, value, color }: { label: string; value: number; color:
   )
 }
 
-export default function PropCard({ prop }: Props) {
+export default function PropCard({ prop, onLogBet }: Props) {
   return (
     <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 space-y-4">
 
@@ -42,6 +43,14 @@ export default function PropCard({ prop }: Props) {
         <div className="flex items-center gap-2 flex-wrap justify-end">
           <OddsTypeBadge oddsType={prop.odds_type} />
           <SignalBadge prop={prop} />
+          {onLogBet && (
+            <button
+              onClick={e => { e.stopPropagation(); onLogBet(prop) }}
+              className="px-3 py-1 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white transition-colors"
+            >
+              Log Bet
+            </button>
+          )}
         </div>
       </div>
 

@@ -198,13 +198,13 @@ export default function Portfolio() {
                 <XAxis dataKey="label" tick={{ fill: '#6b7280', fontSize: 11 }}
                        tickLine={false} axisLine={{ stroke: GRID_COLOR }} minTickGap={40} />
                 <YAxis tick={{ fill: '#6b7280', fontSize: 11 }} tickLine={false}
-                       axisLine={false} width={64}
+                       axisLine={false} width={64} domain={['auto', 'auto']}
                        tickFormatter={(v: number) => `$${v.toLocaleString()}`} />
                 <Tooltip contentStyle={TOOLTIP_STYLE} labelStyle={{ color: '#9ca3af' }}
                          itemStyle={{ color: '#e5e7eb' }} />
                 <ReferenceLine y={initialBankroll} stroke="#4b5563" strokeDasharray="4 4" />
                 <Line type="monotone" dataKey="bankroll" name="Bankroll" stroke={SERIES_COLOR}
-                      strokeWidth={2} dot={false} activeDot={{ r: 4 }} />
+                      strokeWidth={2} dot={false} activeDot={{ r: 4 }} isAnimationActive={false} />
               </LineChart>
             </ResponsiveContainer>
           </div>

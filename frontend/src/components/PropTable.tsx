@@ -6,6 +6,7 @@ import PropCard from './PropCard'
 
 interface Props {
   props: PropResult[]
+  onLogBet?: (prop: PropResult) => void
 }
 
 type SortKey = 'ev_pct' | 'blended_prob' | 'market_prob' | 'historical_prob' | 'player_name'
@@ -55,7 +56,7 @@ function SortHeader({
   )
 }
 
-export default function PropTable({ props }: Props) {
+export default function PropTable({ props, onLogBet }: Props) {
   const [sortKey, setSortKey] = useState<SortKey>('ev_pct')
   const [expanded, setExpanded] = useState<string | null>(null)
 
@@ -143,7 +144,7 @@ export default function PropTable({ props }: Props) {
                 {isOpen && (
                   <tr key={`${key}-card`}>
                     <td colSpan={11} className="px-4 py-3 bg-gray-900/50">
-                      <PropCard prop={prop} />
+                      <PropCard prop={prop} onLogBet={onLogBet} />
                     </td>
                   </tr>
                 )}
