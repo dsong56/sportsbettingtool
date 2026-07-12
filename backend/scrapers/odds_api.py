@@ -6,11 +6,15 @@ from (n_games × n_markets) calls down to (n_games + 1) calls per refresh.
 
 Returns raw prop rows: (player_name, direction, line, odds, book, stat_type, sport)
 """
+from datetime import datetime, timedelta, timezone
 from typing import NamedTuple
 import asyncio
+import logging
 import httpx
 
-from backend.config import ODDS_API_KEY
+from backend.config import ODDS_API_KEY, settings
+
+log = logging.getLogger(__name__)
 
 _BASE = "https://api.the-odds-api.com/v4/sports"
 
@@ -86,14 +90,22 @@ class OddsProp(NamedTuple):
 
 
 async def _get_game_ids(client: httpx.AsyncClient, sport_slug: str) -> list[str]:
-    """1 request — returns all upcoming game IDs for the sport."""
+    """Free request — game IDs for the sport, limited to the slate window
+    so we don't pay for per-game odds calls on games days away."""
+    window_end = (
+        datetime.now(timezone.utc) + timedelta(hours=settings.odds_window_hours)
+    ).strftime("%Y-%m-%dT%H:%M:%SZ")
     resp = await client.get(
         f"{_BASE}/{sport_slug}/events",
         params={"apiKey": ODDS_API_KEY, "regions": "us",
-                "markets": "h2h", "oddsFormat": "american"},
+                "markets": "h2h", "oddsFormat": "american",
+                "commenceTimeTo": window_end},
     )
     if resp.status_code != 200:
         return []
+    remaining = resp.headers.get("x-requests-remaining")
+    if remaining is not None:
+        log.info("Odds API credits remaining: %s", remaining)
     return [g["id"] for g in resp.json()]
 
 
@@ -142,11 +154,13 @@ async def _get_all_markets_for_game(
     return results
 
 
-async def fetch_odds(sport: str) -> list[OddsProp]:
+async def fetch_odds(sport: str, stat_types: set[str] | None = None) -> list[OddsProp]:
     """
-    Fetches all player prop odds for a sport.
-    Request count: 1 (game IDs) + n_games (one batched call each).
-    Previously: 1 + n_games × n_markets.
+    Fetches player prop odds for a sport.
+
+    stat_types: when given, only these PrizePicks stat labels are requested.
+    Credits are billed per market per game, so requesting only the markets
+    actually on today's board is the main cost lever.
     """
     if not ODDS_API_KEY:
         # Fail loudly — returning [] here would surface as a confusing
@@ -154,6 +168,10 @@ async def fetch_odds(sport: str) -> list[OddsProp]:
         raise RuntimeError("ODDS_API_KEY missing — add it to your .env file")
 
     sport_slug, market_map = SPORT_CONFIG[sport]
+    if stat_types is not None:
+        market_map = {k: v for k, v in market_map.items() if k in stat_types}
+    if not market_map:
+        return []
 
     async with httpx.AsyncClient(timeout=30) as client:
         game_ids = await _get_game_ids(client, sport_slug)

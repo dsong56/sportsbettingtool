@@ -31,6 +31,13 @@ class Settings(BaseSettings):
     # --- PrizePicks league IDs ---
     league_ids: dict[str, int] = {"NBA": 7, "NHL": 8, "MLB": 2, "NFL": 9}
 
+    # --- Odds API credit conservation ---
+    # Per-game odds calls cost (markets × regions) credits. Three levers:
+    # request only markets present on the PrizePicks board, only games starting
+    # within the window, and reuse odds scraped within the cache TTL for free.
+    odds_window_hours: int  = 24   # only fetch games starting within this window
+    odds_cache_minutes: int = 10   # reuse snapshots newer than this, no API call
+
     # --- PrizePicks Power Play payout multipliers ---
     # breakeven_per_pick(n) = (1 / multiplier)^(1/n)
     power_play_multipliers: dict[int, float] = {

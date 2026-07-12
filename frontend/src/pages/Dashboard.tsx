@@ -2,7 +2,6 @@ import { useState, useEffect, useCallback } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { fetchProps, triggerRefresh, pollJob } from '../api'
 import PropTable from '../components/PropTable'
-import ParlayOptimizer from '../components/ParlayOptimizer'
 import BetSlip from '../components/BetSlip'
 import Toast from '../components/Toast'
 import type { Sport, PropResult } from '../types'
@@ -187,9 +186,6 @@ export default function Dashboard() {
           <StatPill label="Marginal (1–3%)" value={marginalEv}  sub="yellow rows" />
           <StatPill label="All-signal agree" value={allAgree}  sub={bestEv > 0 ? `Best: +${bestEv.toFixed(1)}%` : '—'} />
         </div>
-
-        {/* Parlay optimizer */}
-        <ParlayOptimizer props={props} />
 
         {/* Filters */}
         <div className="flex flex-wrap items-center gap-3">

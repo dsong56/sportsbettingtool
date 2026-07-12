@@ -175,11 +175,39 @@ def _minutes_flag(logs: list[dict], sport: str) -> bool:
 # ---------- main pipeline ----------
 
 async def run_pipeline(sport: str, db: AsyncSession) -> list[dict]:
-    import asyncio
-    pp_lines, odds_props = await asyncio.gather(
-        fetch_projections(sport),
-        fetch_odds(sport),
-    )
+    from datetime import timedelta
+    from sqlalchemy import func
+    from backend.scrapers.odds_api import OddsProp
+
+    now = _utcnow()
+    pp_lines = await fetch_projections(sport)
+
+    # --- Odds, credit-aware ---
+    # If we scraped odds for this sport within the cache TTL, rebuild the odds
+    # props from those snapshots (0 credits). Otherwise fetch fresh, requesting
+    # only the markets that are actually on the PrizePicks board.
+    cache_cutoff = now - timedelta(minutes=settings.odds_cache_minutes)
+    latest_snap_at = (await db.execute(
+        select(func.max(OddsSnapshot.snapshot_at)).where(OddsSnapshot.sport == sport)
+    )).scalar()
+
+    reused_snapshots = latest_snap_at is not None and latest_snap_at >= cache_cutoff
+    if reused_snapshots:
+        cached_rows = (await db.execute(
+            select(OddsSnapshot).where(
+                OddsSnapshot.sport == sport,
+                OddsSnapshot.snapshot_at == latest_snap_at,
+            )
+        )).scalars().all()
+        odds_props = [
+            OddsProp(player_name=r.player_name, direction=r.direction,
+                     line=r.line_score, odds=r.odds, book=r.book,
+                     stat_type=r.stat_type, sport=sport)
+            for r in cached_rows
+        ]
+    else:
+        needed_stats = {p.stat_type for p in pp_lines}
+        odds_props = await fetch_odds(sport, stat_types=needed_stats)
 
     corrections = await _load_corrections(db, sport)
     canonical_pool = [p.player_name for p in pp_lines]
@@ -198,8 +226,7 @@ async def run_pipeline(sport: str, db: AsyncSession) -> list[dict]:
             under_odds_map[key][prop.book] = prop.odds
 
     # Load recent snapshots for steam detection (last 2 hours to cover the window)
-    from datetime import timedelta
-    cutoff = _utcnow() - timedelta(hours=2)
+    cutoff = now - timedelta(hours=2)
     prev_snaps_rows = (await db.execute(
         select(OddsSnapshot)
         .where(OddsSnapshot.sport == sport, OddsSnapshot.snapshot_at >= cutoff)
@@ -217,7 +244,6 @@ async def run_pipeline(sport: str, db: AsyncSession) -> list[dict]:
             "snapshot_at": r.snapshot_at,
         })
 
-    now = _utcnow()
     stat_fn = _get_stat_fn(sport)
     seen: set[tuple] = set()
     results: list[dict] = []
@@ -288,19 +314,21 @@ async def run_pipeline(sport: str, db: AsyncSession) -> list[dict]:
                 ev = EVResult(market_prob, hist_prob, movement, sample_n)
                 ev = _maybe_apply_ml(ev, sport, direction)
 
-                # --- Persist odds snapshots ---
-                for book, o_odds in over_by_book.items():
-                    db.add(OddsSnapshot(
-                        player_name=canon, stat_type=proj.stat_type,
-                        line_score=line, sport=sport, direction="Over",
-                        odds=o_odds, book=book, snapshot_at=now,
-                    ))
-                for book, u_odds in under_by_book.items():
-                    db.add(OddsSnapshot(
-                        player_name=canon, stat_type=proj.stat_type,
-                        line_score=line, sport=sport, direction="Under",
-                        odds=u_odds, book=book, snapshot_at=now,
-                    ))
+                # --- Persist odds snapshots (skip when odds came from cache —
+                # re-adding them would duplicate rows and fake a steam signal) ---
+                if not reused_snapshots:
+                    for book, o_odds in over_by_book.items():
+                        db.add(OddsSnapshot(
+                            player_name=canon, stat_type=proj.stat_type,
+                            line_score=line, sport=sport, direction="Over",
+                            odds=o_odds, book=book, snapshot_at=now,
+                        ))
+                    for book, u_odds in under_by_book.items():
+                        db.add(OddsSnapshot(
+                            player_name=canon, stat_type=proj.stat_type,
+                            line_score=line, sport=sport, direction="Under",
+                            odds=u_odds, book=book, snapshot_at=now,
+                        ))
 
                 # --- Persist EV result ---
                 db.add(EVResultModel(
