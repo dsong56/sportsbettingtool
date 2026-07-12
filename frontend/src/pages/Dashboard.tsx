@@ -13,7 +13,7 @@ const SPORT_STATS: Record<Sport, string[]> = {
   NBA: ['All', 'Points', 'Rebounds', 'Assists', '3-PT Made', 'Blocked Shots', 'Steals', 'Pts+Rebs+Asts', 'Pts+Rebs', 'Pts+Asts', 'Rebs+Asts'],
   NHL: ['All', 'Shots on Goal', 'Saves', 'Points', 'Blocked Shots', 'Assists', 'Goals'],
   MLB: ['All', 'Pitcher Strikeouts', 'Total Bases', 'Hits Allowed', 'Pitcher Outs', 'Hits+Runs+RBIs'],
-  NFL: ['All', 'Passing Yards', 'Rushing Yards', 'Receiving Yards', 'Receptions', 'Touchdowns', 'Completions', 'Interceptions'],
+  NFL: ['All', 'Pass Yards', 'Rush Yards', 'Receiving Yards', 'Receptions', 'Touchdowns', 'Pass Completions', 'INT'],
 }
 
 type JobStatus = 'idle' | 'pending' | 'running' | 'done' | 'failed'
@@ -118,13 +118,14 @@ export default function Dashboard() {
   useEffect(() => {
     if (!jobId) return
     let polls = 0
-    const MAX_POLLS = 72  // 3 minutes at 2.5s intervals
+    const MAX_POLLS = 240  // 10 minutes at 2.5s intervals — the first scrape per
+                           // sport fetches game logs per player and can be slow
     const interval = setInterval(() => {
       polls++
       if (polls > MAX_POLLS) {
         clearInterval(interval)
         setJobStatus('failed')
-        setJobError('Refresh timed out after 3 minutes — the scrape may still be running in the background')
+        setJobError('Refresh timed out after 10 minutes — the scrape may still be running; check the backend logs')
         setJobId(null)
         return
       }

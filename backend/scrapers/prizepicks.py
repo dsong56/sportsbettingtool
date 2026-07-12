@@ -1,6 +1,9 @@
 """
 PrizePicks scraper — direct httpx calls, no Selenium.
-api.prizepicks.com/projections returns clean JSON with a standard User-Agent.
+
+Uses the partner API host: api.prizepicks.com sits behind DataDome bot
+protection (403 + captcha for any non-browser TLS fingerprint), while
+partner-api.prizepicks.com serves the same JSON without the challenge.
 """
 from datetime import datetime, timezone, timedelta
 from typing import NamedTuple
@@ -13,7 +16,7 @@ _HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
     "Accept": "application/json",
 }
-_BASE = "https://api.prizepicks.com/projections"
+_BASE = "https://partner-api.prizepicks.com/projections"
 _CENTRAL = timezone(timedelta(hours=-5))
 
 # Only Over is offered for demon/goblin bets on PrizePicks
@@ -31,8 +34,11 @@ class PPProjection(NamedTuple):
 
 
 def _fmt_date(iso: str) -> str:
+    # ISO date (YYYY-MM-DD, US Central) — the resolver and the unresolved-
+    # predictions filter compare game_date lexically against ISO dates, and
+    # stats-API game logs key on ISO dates, so this format is load-bearing.
     dt = datetime.fromisoformat(iso).astimezone(_CENTRAL)
-    return dt.strftime(f"{dt.strftime('%b')}-{dt.day}-%Y %I:%M %p")
+    return dt.strftime("%Y-%m-%d")
 
 
 async def fetch_projections(sport: str) -> list[PPProjection]:

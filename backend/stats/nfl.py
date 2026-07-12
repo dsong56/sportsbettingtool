@@ -180,6 +180,7 @@ _STAT_MAP = {
     "Pass Completions": "completions",
     "Interceptions":   "interceptions",
     "Pass Interceptions": "interceptions",
+    "INT":             "interceptions",
 }
 
 

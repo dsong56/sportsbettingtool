@@ -58,6 +58,20 @@ SPORT_CONFIG: dict[str, tuple[str, dict[str, str]]] = {
             "Walks":              "batter_walks",
         },
     ),
+    "NFL": (
+        "americanfootball_nfl",
+        # Keys must match PrizePicks NFL stat_type labels; verify against the
+        # live board at preseason. Combined "Touchdowns" has no O/U odds market,
+        # so those props rely on historical signal only and are skipped here.
+        {
+            "Pass Yards":         "player_pass_yds",
+            "Rush Yards":         "player_rush_yds",
+            "Receiving Yards":    "player_reception_yds",
+            "Receptions":         "player_receptions",
+            "Pass Completions":   "player_pass_completions",
+            "INT":                "player_pass_interceptions",
+        },
+    ),
 }
 
 
@@ -114,6 +128,8 @@ async def _get_all_markets_for_game(
             if pp_stat is None:
                 continue
             for oc in mkt["outcomes"]:
+                if oc.get("point") is None:  # yes/no markets carry no line
+                    continue
                 results.append(OddsProp(
                     player_name=oc["description"],
                     direction=oc["name"],
@@ -132,6 +148,11 @@ async def fetch_odds(sport: str) -> list[OddsProp]:
     Request count: 1 (game IDs) + n_games (one batched call each).
     Previously: 1 + n_games × n_markets.
     """
+    if not ODDS_API_KEY:
+        # Fail loudly — returning [] here would surface as a confusing
+        # "0 props found" instead of pointing at the actual problem
+        raise RuntimeError("ODDS_API_KEY missing — add it to your .env file")
+
     sport_slug, market_map = SPORT_CONFIG[sport]
 
     async with httpx.AsyncClient(timeout=30) as client:
